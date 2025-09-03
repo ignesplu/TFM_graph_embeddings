@@ -116,7 +116,13 @@
 
 ```py
 {
-
+    "hidden":       [64, 96],
+    "heads":        [2, 4],
+    "tf_layers":    [1, 2],
+    "tf_ff":        [128, 256],
+    "dropout":      [0.1, 0.2],
+    "time_enc_dim": [16, 32],
+    "decay":        [0.3, 0.5]
 }
 ```
 
@@ -124,7 +130,15 @@
 
 ```py
 {
-
+    "spatial_hidden":  [64, 128],
+    "spatial_out":     [64, 128],
+    "heads":           [2, 4],
+    "dropout":         [0.1, 0.3],
+    "temporal_layers": [1, 2],
+    "temporal_heads":  [2, 4],
+    "temporal_ff":     [128, 256],
+    "temporal_pe_dim": [None, 64],
+    "lambda_focus":    [0.1, 0.25, 0.5],
 }
 ```
 
@@ -132,4 +146,4 @@
 
 > Además de los hiperparámetros indicados en el presente documento, en cada una de las combinaciones se probará a incluir (`add_idea_emb=True`) y excluir (`add_idea_emb=False`) la variable de _embedding_ de texto de los anuncios de viviendas del municipio. Esto se deba a su gran dimensionalidad y como ésta puede abarcar gran parte del modelo en algunas casos.
 
-> La parametría utilizada en los métodos de validación local (para cada modelo) y global (en la comparativa de _embeddinhgs_ finales) se puede consultar en cada uno de los ficheros de entrenamiento y validación dentro de `src/models/` y `src/validation`, respectivamente.
+> La parametría utilizada en los métodos de validación local (para cada modelo) y global (en la comparativa de _embeddings_ finales) se puede consultar en cada uno de los ficheros de entrenamiento y validación dentro de `src/models/` y `src/validation`, respectivamente.
