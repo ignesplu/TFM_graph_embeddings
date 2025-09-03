@@ -1,0 +1,218 @@
+import pandas as pd
+import time
+
+import torch
+
+from .GTMAE import (
+    grouped_undirected_split,
+    make_supervised_edge_splits,
+    pair_features_from_x,
+    _rmse, _mae, _spearman, _r2,
+    _cartesian_product, composite_score
+)
+from ...models.GTMVAE import (
+    train_edge_node_multitask_v
+)
+
+
+@torch.no_grad()
+def evaluate_gtmvae(model, data, node_feat_names, edge_attr_names, target_cols, node_target_cols,
+                   seed=33, val_ratio=0.2, test_ratio=0.2, device="cpu", use_pair_feats=True, pair_mode="cosine_l2_absdiff"):
+    """Reconstruye los splits con el seed dado y evalúa métricas en VAL y TEST (modo determinista con mu)."""
+    model.eval()
+    train_mask, val_mask, test_mask = grouped_undirected_split(
+        data.edge_index, data.edge_is_undirected, num_nodes=data.num_nodes,
+        val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+    )
+    train_data, val_data, test_data = make_supervised_edge_splits(data, train_mask, val_mask, test_mask)
+
+    all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
+    edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
+    node_target_idx = [node_feat_names.index(c) for c in node_target_cols]
+
+    def _prepare(split):
+        x  = split.x.to(device)
+        ei = split.edge_index.to(device)
+        ea = split.edge_attr.to(device)
+        pos_ei = split.pos_edge_label_index.to(device)
+        y_edge = split.pos_edge_attr.to(device)[:, edge_target_idx]
+        y_node = x[:, node_target_idx]
+        return x, ei, ea, pos_ei, y_edge, y_node
+
+    # VAL
+    x_v, ei_v, ea_v, pos_ei_v, y_edge_v, y_node_v = _prepare(val_data)
+    mu_v, _ = model.encoder(x_v, ei_v, ea_v, drop_prob=0.0)
+    z_v = mu_v
+    pf_v = pair_features_from_x(x_v, pos_ei_v, mode=pair_mode) if use_pair_feats else None
+    y_edge_hat_v = model.edge_dec(z_v, pos_ei_v, pf_v)
+    y_node_hat_v = model.node_dec(z_v)
+
+    # TEST
+    x_t, ei_t, ea_t, pos_ei_t, y_edge_t, y_node_t = _prepare(test_data)
+    mu_t, _ = model.encoder(x_t, ei_t, ea_t, drop_prob=0.0)
+    z_t = mu_t
+    pf_t = pair_features_from_x(x_t, pos_ei_t, mode=pair_mode) if use_pair_feats else None
+    y_edge_hat_t = model.edge_dec(z_t, pos_ei_t, pf_t)
+    y_node_hat_t = model.node_dec(z_t)
+
+    def _np(t): return t.detach().cpu().numpy()
+
+    # --- VAL ---
+    e_true_v, e_pred_v = _np(y_edge_v), _np(y_edge_hat_v)
+    n_true_v, n_pred_v = _np(y_node_v), _np(y_node_hat_v)
+
+    edge_val_rmse = _rmse(e_true_v, e_pred_v)
+    edge_val_mae  = _mae (e_true_v, e_pred_v)
+    try: edge_val_r2 = float(_r2(e_true_v, e_pred_v))
+    except Exception: edge_val_r2 = float("nan")
+    edge_val_sp   = _spearman(e_true_v.ravel(), e_pred_v.ravel())
+
+    node_val_rmse = _rmse(n_true_v, n_pred_v)
+    node_val_mae  = _mae (n_true_v, n_pred_v)
+    try: node_val_r2 = float(_r2(n_true_v, n_pred_v))
+    except Exception: node_val_r2 = float("nan")
+    node_val_sp   = _spearman(n_true_v.ravel(), n_pred_v.ravel())
+
+    # --- TEST ---
+    e_true_t, e_pred_t = _np(y_edge_t), _np(y_edge_hat_t)
+    n_true_t, n_pred_t = _np(y_node_t), _np(y_node_hat_t)
+
+    edge_test_rmse = _rmse(e_true_t, e_pred_t)
+    edge_test_mae  = _mae (e_true_t, e_pred_t)
+    try: edge_test_r2 = float(_r2(e_true_t, e_pred_t))
+    except Exception: edge_test_r2 = float("nan")
+    edge_test_sp   = _spearman(e_true_t.ravel(), e_pred_t.ravel())
+
+    node_test_rmse = _rmse(n_true_t, n_pred_t)
+    node_test_mae  = _mae (n_true_t, n_pred_t)
+    try: node_test_r2 = float(_r2(n_true_t, n_pred_t))
+    except Exception: node_test_r2 = float("nan")
+    node_test_sp   = _spearman(n_true_t.ravel(), n_pred_t.ravel())
+
+    return {
+        "val_edge_rmse": edge_val_rmse, "val_edge_mae": edge_val_mae, "val_edge_r2": edge_val_r2, "val_edge_spearman": edge_val_sp,
+        "val_node_rmse": node_val_rmse, "val_node_mae": node_val_mae, "val_node_r2": node_val_r2, "val_node_spearman": node_val_sp,
+        "test_edge_rmse": edge_test_rmse, "test_edge_mae": edge_test_mae, "test_edge_r2": edge_test_r2, "test_edge_spearman": edge_test_sp,
+        "test_node_rmse": node_test_rmse, "test_node_mae": node_test_mae, "test_node_r2": node_test_r2, "test_node_spearman": node_test_sp,
+    }
+
+
+def default_gtmvae_param_grid():
+    """Malla de hiperparámetros para el GTMVAE (añade beta_kl y kl_warmup)."""
+    grid = {
+        "hid":              [96, 128],
+        "out":              [64, 128],
+        "heads":            [2, 4],
+        "dropout":          [0.1, 0.2],
+        "lr":               [1e-3, 5e-4],
+        "weight_decay":     [1e-5, 1e-4],
+        "edge_drop_prob":   [0.0, 0.2],
+        "edge_loss_type":   ["huber"],
+        "edge_huber_delta": [1.0],
+        "node_loss_type":   ["huber"],
+        "node_huber_delta": [1.0],
+        "lambda_node":      [0.25, 0.5, 1.0],
+        "node_mask_rate":   [0.0, 0.2],
+        "add_ranking":      [False, True],
+        "lambda_rank":      [0.3],
+        "margin":           [0.1],
+        "monitor":          ["val_edge_rmse"],
+        "patience":         [30],
+        "min_delta":        [0.0],
+        "val_ratio":        [0.2],
+        "test_ratio":       [0.2],
+        "seed":             [33],
+        "pair_mode":        ["cosine_l2_absdiff"],
+        "use_pair_feats":   [True],
+        "print_every":      [50],
+        "epochs":           [250],
+        "beta_kl":          [1e-3, 5e-4],
+        "kl_warmup":        [10, 25],
+    }
+    return grid
+
+
+def run_gtmvae_gridsearch(
+    data,
+    node_feat_names,
+    edge_attr_names,
+    device,
+    param_grid=None,
+    limit=None,
+    sort_weights=(0.5, 0.5),
+):
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    target_cols = list(edge_attr_names)
+    node_target_cols = list(node_feat_names)
+
+    grid = param_grid or default_gtmvae_param_grid()
+    combos = list(_cartesian_product(grid))
+    if limit is not None:
+        combos = combos[:limit]
+
+    results = []
+    best_row, best_model, best_Z = None, None, None
+    t0 = time.time()
+
+    for i, hp in enumerate(combos, 1):
+        desc = f"{i}/{len(combos)}"
+        print(f"[{desc}] {hp}")
+        try:
+            model, Z = train_edge_node_multitask_v(
+                data=data,
+                target_cols=target_cols,
+                node_feat_names=node_feat_names,
+                node_target_cols=node_target_cols,
+                hid=hp["hid"], out=hp["out"], heads=hp["heads"], dropout=hp["dropout"],
+                lr=hp["lr"], weight_decay=hp["weight_decay"],
+                edge_drop_prob=hp["edge_drop_prob"],
+                edge_loss_type=hp["edge_loss_type"], edge_huber_delta=hp["edge_huber_delta"],
+                node_loss_type=hp["node_loss_type"], node_huber_delta=hp["node_huber_delta"],
+                lambda_node=hp["lambda_node"],
+                node_mask_rate=hp["node_mask_rate"],
+                add_ranking=hp["add_ranking"], lambda_rank=hp["lambda_rank"], margin=hp["margin"],
+                monitor=hp["monitor"], patience=hp["patience"], min_delta=hp["min_delta"],
+                val_ratio=hp["val_ratio"], test_ratio=hp["test_ratio"],
+                seed=hp["seed"],
+                use_pair_feats=hp["use_pair_feats"], pair_mode=hp["pair_mode"],
+                print_every=hp["print_every"],
+                epochs=hp["epochs"],
+                device=device,
+                # NUEVOS (VAE)
+                beta_kl=hp["beta_kl"], kl_warmup=hp["kl_warmup"],
+                dbg_print=False,
+            )
+
+            metrics = evaluate_gtmvae(
+                model=model,
+                data=data,
+                node_feat_names=node_feat_names,
+                edge_attr_names=edge_attr_names,
+                target_cols=target_cols,
+                node_target_cols=node_target_cols,
+                seed=hp["seed"],
+                val_ratio=hp["val_ratio"], test_ratio=hp["test_ratio"],
+                device=device,
+                use_pair_feats=hp["use_pair_feats"],
+                pair_mode=hp["pair_mode"],
+            )
+
+            row = {**hp, **metrics}
+            row["combo_idx"] = i
+            row["seconds"] = round(time.time() - t0, 2)
+            row["score"] = composite_score(row, *sort_weights)
+            results.append(row)
+
+            if (best_row is None) or (row["score"] < best_row["score"]):
+                best_row, best_model, best_Z = row, model, Z
+
+            print(f"[*] score={row['score']:.4f}  edge_RMSE={row['val_edge_rmse']:.4f}  node_RMSE={row['val_node_rmse']:.4f}")
+
+        except Exception as e:
+            print(f"[*] ERROR: {e}")
+            continue
+
+    df = pd.DataFrame(results).sort_values("score", ascending=True).reset_index(drop=True)
+    return df, best_model, best_Z
+
