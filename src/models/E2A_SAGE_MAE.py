@@ -38,9 +38,7 @@ class EdgeSAGEConvEA(MessagePassing):
     Output: out_i = mean_j(m_ij) + W_s x_i
     """
 
-    def __init__(
-        self, in_channels: int, edge_dim: int, out_channels: int, bias: bool = True
-    ):
+    def __init__(self, in_channels: int, edge_dim: int, out_channels: int, bias: bool = True):
         """
         Initialize EdgeSAGEConvEA layer.
 
@@ -55,7 +53,7 @@ class EdgeSAGEConvEA(MessagePassing):
         self.lin_edge = nn.Linear(edge_dim, out_channels, bias=False)
         self.lin_self = nn.Linear(in_channels, out_channels, bias=bias)
 
-        # Inicialización xavier para estabilidad
+        # Xavier initialization for stability
         nn.init.xavier_uniform_(self.lin_neigh.weight)
         nn.init.xavier_uniform_(self.lin_edge.weight)
         nn.init.xavier_uniform_(self.lin_self.weight)
@@ -156,7 +154,7 @@ class E2ASAGEEncoder(nn.Module):
         Returns:
             Node embeddings
         """
-        # Edge dropout (solo índice + máscara para alinear edge_attr)
+        # Edge dropout
         if drop_prob > 0 and self.training:
             edge_index, edge_mask = dropout_edge(edge_index, p=drop_prob, training=True)
             if edge_attr is not None:
@@ -264,7 +262,7 @@ def train_edge_node_multitask_sage(
         Tuple of (trained model, node embeddings)
     """
 
-    # ---------- split de aristas ----------
+    # Split
     train_mask, val_mask, test_mask = grouped_undirected_split(
         data.edge_index,
         data.edge_is_undirected,
@@ -277,11 +275,9 @@ def train_edge_node_multitask_sage(
         data, train_mask, val_mask, test_mask
     )
 
-    # Mapear objetivos de ARISTA
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
     edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
 
-    # Mapear objetivos de NODO sobre X
     node_target_idx = [node_feat_names.index(c) for c in node_target_cols]
     node_out_dim = len(node_target_idx)
 
@@ -292,7 +288,7 @@ def train_edge_node_multitask_sage(
         print(f"[EDGE TARGETS] {target_cols} -> idx {edge_target_idx}")
         print(f"[NODE TARGETS] {node_target_cols} -> idx {node_target_idx}")
 
-    # ---------- modelo ----------
+    # Model
     class E2ASAGEGMAE(nn.Module):
         def __init__(self):
             super().__init__()
@@ -316,7 +312,7 @@ def train_edge_node_multitask_sage(
     model = E2ASAGEGMAE().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Pérdidas
+    # Loss
     def _make_reg_loss(kind, delta):
         if kind == "huber":
             return nn.SmoothL1Loss(beta=delta)
@@ -340,7 +336,7 @@ def train_edge_node_multitask_sage(
     x_va, ei_va, ea_va, pos_ei_va, y_edge_va = _to_dev(val_data)
     x_te, ei_te, ea_te, pos_ei_te, y_edge_te = _to_dev(test_data)
 
-    # Targets nodales (a partir de X original ya estandarizada)
+    # Node targets
     def _node_targets(x_tensor):
         return x_tensor[:, node_target_idx]  # [N, Tn]
 
@@ -356,7 +352,7 @@ def train_edge_node_multitask_sage(
         restore_best=restore_best,
     )
 
-    # ---- helpers ranking (edge) ----
+    # Helpers ranking (edge)
     def _ranking_loss(z, pos_ei, y_true, margin=0.1):
         with torch.no_grad():
             u = pos_ei[0].cpu().numpy()
@@ -389,7 +385,7 @@ def train_edge_node_multitask_sage(
         s_neg = (zu * zvn).sum(dim=-1)
         return torch.clamp(margin - s_pos + s_neg, min=0.0).mean()
 
-    # ---- máscara anti-fuga para targets nodales (opcional) ----
+    # Anti-leak mask for nodal targets
     def _mask_node_inputs(x_tensor, rate):
         if rate <= 0:
             return x_tensor
@@ -405,28 +401,23 @@ def train_edge_node_multitask_sage(
             x_masked[:, node_target_idx] = x_masked[:, node_target_idx] * m
         return x_masked
 
-    # --------------- TRAIN LOOP ---------------
+    # Train loop
     print("[TRAIN]")
     for ep in range(1, epochs + 1):
         model.train()
         opt.zero_grad()
 
-        # Enmascara SOLO columnas target nodales en la entrada de TRAIN
+        # Mask node input
         x_tr_in = _mask_node_inputs(x_tr, node_mask_rate)
 
-        # Encoder con aristas de TRAIN (dropout de aristas activado)
         z = model.encoder(x_tr_in, ei_tr, ea_tr, drop_prob=edge_drop_prob)
 
-        # ----- Edge head -----
-        pf_tr = (
-            pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        # Edge head
+        pf_tr = pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode) if use_pair_feats else None
         y_edge_hat = model.edge_dec(z, pos_ei_tr, pf_tr)  # [Es, Te]
         edge_reg_loss = edge_loss_fn(y_edge_hat, y_edge_tr)
 
-        # ----- Node head -----
+        # Node head
         y_node_hat = model.node_dec(z)  # [N, Tn]
         node_reg_loss = (
             node_loss_fn(y_node_hat, y_node_tr)
@@ -434,7 +425,7 @@ def train_edge_node_multitask_sage(
             else torch.tensor(0.0, device=z.device)
         )
 
-        # ----- Ranking opcional (edge) -----
+        # Ranking (edge)
         if add_ranking:
             rank_loss = _ranking_loss(z, pos_ei_tr, y_edge_tr, margin=margin)
         else:
@@ -448,23 +439,21 @@ def train_edge_node_multitask_sage(
         loss.backward()
         opt.step()
 
-        # ---- VALIDACIÓN ----
+        # VAL
         model.eval()
         with torch.no_grad():
             z_va = model.encoder(x_va, ei_va, ea_va, drop_prob=0.0)
 
             # Edge val
             pf_va = (
-                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode)
-                if use_pair_feats
-                else None
+                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode) if use_pair_feats else None
             )
             y_edge_hat_va = model.edge_dec(z_va, pos_ei_va, pf_va)
 
             # Node val
             y_node_hat_va = model.node_dec(z_va) if node_out_dim > 0 else None
 
-            # Métricas EDGE
+            # EDGE Metrics
             y_edge_va_np = y_edge_va.detach().cpu().numpy()
             y_edge_hat_va_np = y_edge_hat_va.detach().cpu().numpy()
             edge_val_rmse = _rmse(y_edge_va_np, y_edge_hat_va_np)
@@ -472,7 +461,7 @@ def train_edge_node_multitask_sage(
             edge_val_spr = _spearman(y_edge_va_np.ravel(), y_edge_hat_va_np.ravel())
             edge_val_r2 = _r2(y_edge_va_np, y_edge_hat_va_np)
 
-            # Métricas NODE
+            # NODE Metrics
             if node_out_dim > 0:
                 y_node_va_np = y_node_va.detach().cpu().numpy()
                 y_node_hat_va_np = y_node_hat_va.detach().cpu().numpy()
@@ -492,63 +481,49 @@ def train_edge_node_multitask_sage(
             )
             print(log)
 
-        # ---- early stopping según 'monitor' ----
+        # Early stopping by monitor
         if monitor == "val_edge_rmse":
             score, es.mode = edge_val_rmse, "min"
         elif monitor == "val_edge_mae":
             score, es.mode = edge_val_mae, "min"
         elif monitor == "val_edge_spr":
-            score, es.mode = (
-                edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9), "max"
         elif monitor == "val_node_rmse":
             score, es.mode = node_val_rmse, "min"
         elif monitor == "val_node_mae":
             score, es.mode = node_val_mae, "min"
         else:
-            score, es.mode = (
-                edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9), "max"
 
         if es.step(score, model):
             if print_every:
-                print(
-                    f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f})."
-                )
+                print(f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f}).")
             break
 
     es.maybe_restore(model)
 
-    # ---- Embeddings finales en el grafo COMPLETO ----
+    # Final embeddings
     model.eval()
     with torch.no_grad():
         Z = model.encoder(
             data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)
         ).cpu()
 
-    # ---- TEST ----
+    # TEST
     with torch.no_grad():
         # EDGE
         z_te = model.encoder(x_te, ei_te, ea_te, drop_prob=0.0)
-        pf_te = (
-            pair_features_from_x(x_te, pos_ei_te, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        pf_te = pair_features_from_x(x_te, pos_ei_te, mode=pair_mode) if use_pair_feats else None
         y_edge_hat_te = model.edge_dec(z_te, pos_ei_te, pf_te)
         edge_test_rmse = _rmse(
             y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
         )
-        edge_test_mae = _mae(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_mae = _mae(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
         edge_test_spr = _spearman(
             y_edge_te.detach().cpu().numpy().ravel(),
             y_edge_hat_te.detach().cpu().numpy().ravel(),
         )
-        edge_test_r2 = _r2(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_r2 = _r2(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
 
         # NODE
         y_node_hat_te = model.node_dec(z_te) if node_out_dim > 0 else None
@@ -567,9 +542,7 @@ def train_edge_node_multitask_sage(
                 y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy()
             )
         else:
-            node_test_rmse = node_test_mae = node_test_spr = node_test_sr2 = float(
-                "nan"
-            )
+            node_test_rmse = node_test_mae = node_test_spr = node_test_sr2 = float("nan")
 
     if print_every:
         print("[TEST]")

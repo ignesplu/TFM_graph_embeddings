@@ -27,9 +27,7 @@ from .GTMAE import (
 # +------------------+
 
 
-def _kl_normal(
-    mu: torch.Tensor, logvar: torch.Tensor, reduction: str = "mean"
-) -> torch.Tensor:
+def _kl_normal(mu: torch.Tensor, logvar: torch.Tensor, reduction: str = "mean") -> torch.Tensor:
     """
     Compute KL divergence between normal distribution and standard normal.
     Calculates KL(q(z|x)=N(mu,diag(sigma^2)) || p(z)=N(0,I)).
@@ -48,12 +46,10 @@ def _kl_normal(
     elif reduction == "mean":
         return kl.mean()
     else:
-        return kl.sum(dim=-1)  # por muestra
+        return kl.sum(dim=-1)
 
 
-def _reparameterize(
-    mu: torch.Tensor, logvar: torch.Tensor, training: bool
-) -> torch.Tensor:
+def _reparameterize(mu: torch.Tensor, logvar: torch.Tensor, training: bool) -> torch.Tensor:
     """
     Reparameterization trick for sampling from normal distribution.
 
@@ -70,7 +66,7 @@ def _reparameterize(
         eps = torch.randn_like(std)
         return mu + eps * std
     else:
-        return mu  # modo determinista en eval
+        return mu
 
 
 # +---------+
@@ -114,24 +110,18 @@ class EdgeAwareGCNVEncoder(nn.Module):
         super().__init__()
 
         # 1) Pre-bottleneck: comprime feats en pre_dim
-        self.pre = nn.Sequential(
-            nn.Linear(in_ch, pre_dim), nn.ReLU(), nn.Dropout(pre_drop)
-        )
+        self.pre = nn.Sequential(nn.Linear(in_ch, pre_dim), nn.ReLU(), nn.Dropout(pre_drop))
 
         # 2) GNN
-        self.conv1 = TransformerConv(
-            pre_dim, hid, heads=heads, edge_dim=edge_dim, dropout=dropout
-        )
+        self.conv1 = TransformerConv(pre_dim, hid, heads=heads, edge_dim=edge_dim, dropout=dropout)
         self.norm1 = nn.LayerNorm(hid * heads)
 
-        self.conv2 = TransformerConv(
-            hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout
-        )
+        self.conv2 = TransformerConv(hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout)
         self.norm2 = nn.LayerNorm(out)
 
         self.dropout = dropout
 
-        # 3) Cabezas variacionales
+        # 3) Variational heads
         self.lin_mu = nn.Linear(out, out)
         self.lin_logvar = nn.Linear(out, out)
 
@@ -151,11 +141,9 @@ class EdgeAwareGCNVEncoder(nn.Module):
         # Pre-bottleneck
         x = self.pre(x)
 
-        # Edge dropout (solo índice/atributos de arista)
+        # Edge dropout
         if drop_prob > 0 and self.training:
-            edge_index, edge_mask = dropout_edge(
-                edge_index, p=drop_prob, training=self.training
-            )
+            edge_index, edge_mask = dropout_edge(edge_index, p=drop_prob, training=self.training)
             if edge_attr is not None:
                 edge_attr = edge_attr[edge_mask]
 
@@ -169,7 +157,7 @@ class EdgeAwareGCNVEncoder(nn.Module):
         h = self.conv2(h, edge_index, edge_attr)
         h = self.norm2(h)
 
-        # Var heads
+        # Variational heads
         mu = self.lin_mu(h)
         logvar = self.lin_logvar(h)
         return mu, logvar
@@ -263,7 +251,7 @@ def train_edge_node_multitask_v(
     Returns:
         Tuple of (trained model, deterministic node embeddings)
     """
-    # ---------- split de aristas ----------
+    # Splits
     train_mask, val_mask, test_mask = grouped_undirected_split(
         data.edge_index,
         data.edge_is_undirected,
@@ -276,11 +264,9 @@ def train_edge_node_multitask_v(
         data, train_mask, val_mask, test_mask
     )
 
-    # Mapear objetivos de ARISTA
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
     edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
 
-    # Mapear objetivos de NODO
     node_target_idx = [node_feat_names.index(c) for c in node_target_cols]
     node_out_dim = len(node_target_idx)
 
@@ -291,7 +277,7 @@ def train_edge_node_multitask_v(
         print(f"[EDGE TARGETS] {target_cols} -> idx {edge_target_idx}")
         print(f"[NODE TARGETS] {node_target_cols} -> idx {node_target_idx}")
 
-    # ---------- modelo ----------
+    # Model
     class GTMultiModel(nn.Module):
         def __init__(self):
             super().__init__()
@@ -314,7 +300,7 @@ def train_edge_node_multitask_v(
     model = GTMultiModel().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Pérdidas de reconstrucción
+    # Loss
     def _make_reg_loss(kind, delta):
         if kind == "huber":
             return nn.SmoothL1Loss(beta=delta)
@@ -338,7 +324,7 @@ def train_edge_node_multitask_v(
     x_va, ei_va, ea_va, pos_ei_va, y_edge_va = _to_dev(val_data)
     x_te, ei_te, ea_te, pos_ei_te, y_edge_te = _to_dev(test_data)
 
-    # Targets nodales
+    # Node targets
     def _node_targets(x_tensor):
         return x_tensor[:, node_target_idx]
 
@@ -402,7 +388,7 @@ def train_edge_node_multitask_v(
             x_masked[:, node_target_idx] = x_masked[:, node_target_idx] * m
         return x_masked
 
-    # --------------- TRAIN LOOP ---------------
+    # Train loop
     print("[TRAIN]")
     for ep in range(1, epochs + 1):
         model.train()
@@ -411,25 +397,19 @@ def train_edge_node_multitask_v(
         # Warmup KL
         kl_coeff = float(beta_kl) * min(1.0, ep / max(1, kl_warmup))
 
-        # Enmascara SOLO columnas target nodales en la entrada de TRAIN
+        # Mask node inputs
         x_tr_in = _mask_node_inputs(x_tr, node_mask_rate)
 
-        # Encoder variacional (TRAIN): mu, logvar -> z
-        mu_tr, logvar_tr = model.encoder(
-            x_tr_in, ei_tr, ea_tr, drop_prob=edge_drop_prob
-        )
+        # Variacional encoder (TRAIN): mu, logvar -> z
+        mu_tr, logvar_tr = model.encoder(x_tr_in, ei_tr, ea_tr, drop_prob=edge_drop_prob)
         z = _reparameterize(mu_tr, logvar_tr, training=True)
 
-        # ----- Edge head -----
-        pf_tr = (
-            pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        # Edge head
+        pf_tr = pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode) if use_pair_feats else None
         y_edge_hat = model.edge_dec(z, pos_ei_tr, pf_tr)
         edge_reg_loss = edge_loss_fn(y_edge_hat, y_edge_tr)
 
-        # ----- Node head -----
+        # Node head
         y_node_hat = model.node_dec(z)
         node_reg_loss = (
             node_loss_fn(y_node_hat, y_node_tr)
@@ -437,10 +417,10 @@ def train_edge_node_multitask_v(
             else torch.tensor(0.0, device=z.device)
         )
 
-        # ----- KL -----
+        # KL
         kl_loss = _kl_normal(mu_tr, logvar_tr, reduction="mean")
 
-        # ----- Ranking opcional (edge) -----
+        # Ranking (edge)
         if add_ranking:
             rank_loss = _ranking_loss(z, pos_ei_tr, y_edge_tr, margin=margin)
         else:
@@ -455,7 +435,7 @@ def train_edge_node_multitask_v(
         loss.backward()
         opt.step()
 
-        # ---- VALIDACIÓN (determinista: usar mu) ----
+        # Validation
         model.eval()
         with torch.no_grad():
             mu_va, logvar_va = model.encoder(x_va, ei_va, ea_va, drop_prob=0.0)
@@ -463,15 +443,13 @@ def train_edge_node_multitask_v(
 
             # Edge val
             pf_va = (
-                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode)
-                if use_pair_feats
-                else None
+                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode) if use_pair_feats else None
             )
             y_edge_hat_va = model.edge_dec(z_va, pos_ei_va, pf_va)
             # Node val
             y_node_hat_va = model.node_dec(z_va) if node_out_dim > 0 else None
 
-            # Métricas EDGE
+            # EDGE Metrics
             y_edge_va_np = y_edge_va.detach().cpu().numpy()
             y_edge_hat_va_np = y_edge_hat_va.detach().cpu().numpy()
             edge_val_rmse = _rmse(y_edge_va_np, y_edge_hat_va_np)
@@ -479,7 +457,7 @@ def train_edge_node_multitask_v(
             edge_val_spr = _spearman(y_edge_va_np.ravel(), y_edge_hat_va_np.ravel())
             edge_val_r2 = _r2(y_edge_va_np, y_edge_hat_va_np)
 
-            # Métricas NODE
+            # NODE Metrics
             if node_out_dim > 0:
                 y_node_va_np = y_node_va.detach().cpu().numpy()
                 y_node_hat_va_np = y_node_hat_va.detach().cpu().numpy()
@@ -499,34 +477,28 @@ def train_edge_node_multitask_v(
             )
             print(log)
 
-        # ---- early stopping según 'monitor' ----
+        # Early stopping by monitor
         if monitor == "val_edge_rmse":
             score, es.mode = edge_val_rmse, "min"
         elif monitor == "val_edge_mae":
             score, es.mode = edge_val_mae, "min"
         elif monitor == "val_edge_spr":
-            score, es.mode = (
-                edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9), "max"
         elif monitor == "val_node_rmse":
             score, es.mode = node_val_rmse, "min"
         elif monitor == "val_node_mae":
             score, es.mode = node_val_mae, "min"
         else:
-            score, es.mode = (
-                node_val_spr if not (node_val_spr != node_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (node_val_spr if not (node_val_spr != node_val_spr) else -1e9), "max"
 
         if es.step(score, model):
             if print_every:
-                print(
-                    f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f})."
-                )
+                print(f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f}).")
             break
 
     es.maybe_restore(model)
 
-    # ---- Embeddings finales en el grafo COMPLETO (determinista: mu) ----
+    # Final embeddings
     model.eval()
     with torch.no_grad():
         mu_full, _ = model.encoder(
@@ -534,29 +506,21 @@ def train_edge_node_multitask_v(
         )
         Z = mu_full.cpu()
 
-    # ---- TEST ----
+    # TEST
     with torch.no_grad():
         mu_te, _ = model.encoder(x_te, ei_te, ea_te, drop_prob=0.0)
         z_te = mu_te
-        pf_te = (
-            pair_features_from_x(x_te, pos_ei_te, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        pf_te = pair_features_from_x(x_te, pos_ei_te, mode=pair_mode) if use_pair_feats else None
         y_edge_hat_te = model.edge_dec(z_te, pos_ei_te, pf_te)
         edge_test_rmse = _rmse(
             y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
         )
-        edge_test_mae = _mae(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_mae = _mae(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
         edge_test_spr = _spearman(
             y_edge_te.detach().cpu().numpy().ravel(),
             y_edge_hat_te.detach().cpu().numpy().ravel(),
         )
-        edge_test_r2 = _r2(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_r2 = _r2(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
 
         y_node_hat_te = model.node_dec(z_te) if node_out_dim > 0 else None
         if node_out_dim > 0:
@@ -574,9 +538,7 @@ def train_edge_node_multitask_v(
                 y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy()
             )
         else:
-            node_test_rmse = node_test_mae = node_test_spr = node_test_sr2 = float(
-                "nan"
-            )
+            node_test_rmse = node_test_mae = node_test_spr = node_test_sr2 = float("nan")
 
     if print_every:
         print("[TEST]")

@@ -13,10 +13,10 @@ from ...models.TGT import PreproTGT, TGTConfig, compute_tgt_embeddings
 def _grid_keys_order(grid: dict):
     """
     Get ordered list of grid parameter keys.
-    
+
     Args:
         grid: Parameter grid dictionary
-        
+
     Returns:
         List of parameter keys in consistent order
     """
@@ -26,11 +26,11 @@ def _grid_keys_order(grid: dict):
 def _params_key(params: dict, keys_order: list):
     """
     Create unique key for parameter combination.
-    
+
     Args:
         params: Parameter dictionary
         keys_order: Ordered list of parameter keys
-        
+
     Returns:
         Tuple representing unique parameter combination
     """
@@ -40,11 +40,11 @@ def _params_key(params: dict, keys_order: list):
 def _load_completed_param_keys(csv_path: str, keys_order: list):
     """
     Load already completed parameter combinations from CSV.
-    
+
     Args:
         csv_path: Path to results CSV file
         keys_order: Ordered list of parameter keys
-        
+
     Returns:
         Set of completed parameter combinations
     """
@@ -63,7 +63,7 @@ def _load_completed_param_keys(csv_path: str, keys_order: list):
 def _append_row_to_csv(row_dict: dict, csv_path: str):
     """
     Append a row of results to CSV file.
-    
+
     Args:
         row_dict: Dictionary of results to append
         csv_path: Path to CSV file
@@ -83,7 +83,7 @@ def _extract_targets_from_temp(
 ):
     """
     Extract target variables from temporal data for specific year.
-    
+
     Args:
         temp_df: Temporal data DataFrame
         node_index: Node ID to index mapping
@@ -91,7 +91,7 @@ def _extract_targets_from_temp(
         target_cols: Specific target columns to extract
         cc_col: Node identifier column name
         year_col: Year column name
-        
+
     Returns:
         Dictionary of target arrays indexed by column name
     """
@@ -104,9 +104,7 @@ def _extract_targets_from_temp(
     if target_cols is not None:
         feature_cols = [c for c in feature_cols if c in set(target_cols)]
         if len(feature_cols) == 0:
-            raise ValueError(
-                "None of the requested target_cols are numeric or present in temp_df."
-            )
+            raise ValueError("None of the requested target_cols are numeric or present in temp_df.")
     yr = df[df[year_col] == target_year]
     out = {}
     for col in feature_cols:
@@ -132,12 +130,12 @@ def _extract_targets_from_temp(
 def _ridge_closed_form(X: np.ndarray, y: np.ndarray, alpha: float = 1.0):
     """
     Compute ridge regression solution in closed form.
-    
+
     Args:
         X: Feature matrix
         y: Target vector
         alpha: Regularization strength
-        
+
     Returns:
         Tuple of (weights, RMSE)
     """
@@ -162,7 +160,7 @@ def _kfold_rmse(
 ) -> float:
     """
     Compute k-fold cross-validated RMSE using ridge regression.
-    
+
     Args:
         Z: Embedding matrix
         idx: Node indices for target values
@@ -170,7 +168,7 @@ def _kfold_rmse(
         alpha: Ridge regularization parameter
         k: Number of folds
         seed: Random seed for reproducibility
-        
+
     Returns:
         Mean RMSE across k folds
     """
@@ -182,11 +180,7 @@ def _kfold_rmse(
     rmses = []
     for fi in range(k):
         test_ix = folds[fi]
-        train_ix = (
-            np.concatenate([folds[j] for j in range(k) if j != fi])
-            if k > 1
-            else test_ix
-        )
+        train_ix = np.concatenate([folds[j] for j in range(k) if j != fi]) if k > 1 else test_ix
         Xtr, ytr = Z[idx[train_ix]], y[train_ix]
         Xte, yte = Z[idx[test_ix]], y[test_ix]
         w, _ = _ridge_closed_form(Xtr, ytr, alpha=alpha)
@@ -201,7 +195,7 @@ def _kfold_rmse(
 def default_tgt_param_grid():
     """
     Define default hyperparameter grid for Temporal Graph Transformer.
-    
+
     Returns:
         Dictionary of parameter ranges for grid search
     """
@@ -219,10 +213,10 @@ def default_tgt_param_grid():
 def _expand_grid(grid: dict):
     """
     Generate all combinations of grid parameters.
-    
+
     Args:
         grid: Parameter grid dictionary
-        
+
     Returns:
         List of all parameter combinations
     """
@@ -254,10 +248,10 @@ def run_tgt_gridsearch(
 ):
     """
     Run comprehensive grid search for Temporal Graph Transformer hyperparameters.
-    
+
     Performs memory-efficient grid search with resume capability, evaluating
     each parameter combination using k-fold cross-validation with ridge regression.
-    
+
     Args:
         tabu: Tabular data DataFrame
         temp: Temporal data DataFrame
@@ -275,7 +269,7 @@ def run_tgt_gridsearch(
         csv_path: Path to save results CSV
         resume: Whether to resume from existing results
         save_weights_json: Whether to save temporal weights (memory intensive)
-        
+
     Returns:
         DataFrame with grid search results sorted by average RMSE
     """
@@ -289,14 +283,12 @@ def run_tgt_gridsearch(
     if verbose and completed:
         print(f"[resume] Saltando {len(completed)} combinaciones ya completadas.")
 
-    # Preprocesado una vez
+    # Prepro data
     p = PreproTGT(add_idea_emb=add_idea_emb, no_mad=no_mad)
     prep = p.run(tabu, temp, mdir, mndi)
 
-    # Targets una vez (usa dtypes ligeros)
-    targets = _extract_targets_from_temp(
-        temp, prep.node_index, target_year, target_cols
-    )
+    # Targets
+    targets = _extract_targets_from_temp(temp, prep.node_index, target_year, target_cols)
 
     total = len(combos)
     for i, params in enumerate(combos, start=1):
@@ -320,7 +312,6 @@ def run_tgt_gridsearch(
 
         row = {**params}
         try:
-            # asegúrate de no construir grafos de gradiente
             with torch.inference_mode():
                 Z, years, w = compute_tgt_embeddings(
                     prep,
@@ -330,13 +321,11 @@ def run_tgt_gridsearch(
                     decay=params["decay"],
                 )
 
-            # baja a float32 para ahorrar RAM
             Znp = Z.numpy().astype(np.float32, copy=False)
 
-            # RMSE por target
+            # RMSE x target
             rmses = []
             for tname, (idx, y) in targets.items():
-                # dtypes ligeros
                 y = y.astype(np.float32, copy=False)
                 idx = idx.astype(np.int32, copy=False)
                 rmse = _kfold_rmse(Znp, idx, y, alpha=alpha_ridge, k=k_folds)
@@ -345,12 +334,9 @@ def run_tgt_gridsearch(
 
             row["avg_rmse"] = float(np.mean(rmses)) if rmses else float("inf")
             row["years_json"] = (
-                json.dumps(list(map(int, years)))
-                if hasattr(years, "__iter__")
-                else "[]"
+                json.dumps(list(map(int, years))) if hasattr(years, "__iter__") else "[]"
             )
             if save_weights_json and hasattr(w, "numpy"):
-                # OJO: puede ser grande; por eso lo desactivamos por defecto
                 row["weights_json"] = json.dumps(w.numpy().astype(np.float32).tolist())
             row["status"] = "ok"
             if verbose:
@@ -365,7 +351,7 @@ def run_tgt_gridsearch(
 
         _append_row_to_csv(row, csv_path)
 
-        # --- liberar memoria agresivamente ---
+        # Memory
         for var in ("Z", "Znp", "years", "w", "rmses"):
             if var in locals():
                 try:
@@ -374,7 +360,6 @@ def run_tgt_gridsearch(
                     pass
         gc.collect()
 
-    # devolver algo ligero (si quieres)
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
         if "avg_rmse" in df.columns:

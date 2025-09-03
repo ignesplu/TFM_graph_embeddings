@@ -43,38 +43,33 @@ def validation_emb(
     Returns:
         tuple: RMSE scores for (Linear Regression, XGBoost, Random Forest, SVR)
     """
-    # --------------------------
-    # 0) Semillas y control de hilos
-    # --------------------------
     SEED = 33
-    os.environ["PYTHONHASHSEED"] = "0"  # hash estable
-    os.environ["OMP_NUM_THREADS"] = "1"  # evita no-determinismo en OpenMP
-    os.environ["MKL_NUM_THREADS"] = "1"  # evita no-determinismo en MKL
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
     os.environ["NUMEXPR_NUM_THREADS"] = "1"
     random.seed(SEED)
     np.random.seed(SEED)
 
     data = emb_df.merge(raw_df[[node_id_col, target_col]], on=node_id_col, how="inner")
-    # Ordena por id para garantizar la misma permutación antes del split
     data = data.sort_values(by=node_id_col).reset_index(drop=True)
 
     X = data[[c for c in data.columns if c.startswith(pref_X)]].copy()
     y = data[target_col].copy()
 
-    # Asegura mismo dtype/orden de columnas
     X = X.reindex(sorted(X.columns), axis=1)
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=SEED, shuffle=True, stratify=None
     )
 
-    # 2) Regresión Lineal
+    # 1) LineaRegression
     linreg = LinearRegression(n_jobs=None)
     linreg.fit(X_train, y_train)
     y_pred_lr = linreg.predict(X_test)
     lr_rmse = mean_squared_error(y_test, y_pred_lr)
 
-    # 3) XGBoost
+    # 2) XGBoost
     xgb_model = xgb.XGBRegressor(
         n_estimators=300,
         learning_rate=0.05,
@@ -89,7 +84,7 @@ def validation_emb(
     y_pred_xgb = xgb_model.predict(X_test)
     xgb_rmse = mean_squared_error(y_test, y_pred_xgb)
 
-    # 4) RandomForest
+    # 3) RandomForest
     rf = RandomForestRegressor(
         n_estimators=300,
         max_depth=None,
@@ -102,7 +97,7 @@ def validation_emb(
     y_pred_rf = rf.predict(X_test)
     rf_rmse = mean_squared_error(y_test, y_pred_rf)
 
-    # 5) SVR
+    # 4) SVR
     svr = SVR(
         kernel="rbf",
         C=10,
@@ -158,6 +153,13 @@ def gridsearch_params(
     trains LINE models with different configurations, and evaluates their performance
     using multiple regression models and validation metrics. It aggregates results
     and calculates weighted rankings to identify optimal parameter settings.
+
+    Note:
+        In weighted rankings, XGB is given slightly more weight as it is the best predictor
+        in most cases. On the other hand, RF is given more weight than SVR as RF tends to
+        generalise better in graph/tabular embeddings and is more consistent. Finally, LR
+        is kept at 0.15 because it makes sense to keep it as a signal of linearity, but
+        without distorting it too much.
 
     Args:
         device: Torch device (CPU/GPU) for model training
@@ -346,9 +348,7 @@ def gridsearch_params(
     ]
     # Ranking Metrics
     for rmse in list_rmse:
-        val_final[f"rank_{rmse}"] = val_final[rmse].rank(
-            method="average", ascending=True
-        )
+        val_final[f"rank_{rmse}"] = val_final[rmse].rank(method="average", ascending=True)
 
     # Rank Mean
     val_final["rank_mean"] = val_final[
@@ -356,10 +356,6 @@ def gridsearch_params(
     ].mean(axis=1)
 
     weights = {"_xgb": 0.40, "_rf": 0.25, "_svr": 0.20, "_lr": 0.15}
-
-    # Refuerzo un poco más el peso de XGB (porque es el mejor predictor en la mayoría de casos).
-    # Le doy más a RF que a SVR (RF suele generalizar mejor en embeddings de grafos/tabulares y es más consistente).
-    # Mantengo LR al 0.15 porque tiene sentido conservarlo como señal de linealidad, pero sin que distorsione mucho.
 
     def weighted_mean(row):
         total = 0

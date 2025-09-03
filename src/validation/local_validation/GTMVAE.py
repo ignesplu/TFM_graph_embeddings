@@ -65,9 +65,7 @@ def evaluate_gtmvae(
         test_ratio=test_ratio,
         seed=seed,
     )
-    train_data, val_data, test_data = make_supervised_edge_splits(
-        data, train_mask, val_mask, test_mask
-    )
+    _, val_data, test_data = make_supervised_edge_splits(data, train_mask, val_mask, test_mask)
 
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
     edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
@@ -86,9 +84,7 @@ def evaluate_gtmvae(
     x_v, ei_v, ea_v, pos_ei_v, y_edge_v, y_node_v = _prepare(val_data)
     mu_v, _ = model.encoder(x_v, ei_v, ea_v, drop_prob=0.0)
     z_v = mu_v
-    pf_v = (
-        pair_features_from_x(x_v, pos_ei_v, mode=pair_mode) if use_pair_feats else None
-    )
+    pf_v = pair_features_from_x(x_v, pos_ei_v, mode=pair_mode) if use_pair_feats else None
     y_edge_hat_v = model.edge_dec(z_v, pos_ei_v, pf_v)
     y_node_hat_v = model.node_dec(z_v)
 
@@ -96,16 +92,14 @@ def evaluate_gtmvae(
     x_t, ei_t, ea_t, pos_ei_t, y_edge_t, y_node_t = _prepare(test_data)
     mu_t, _ = model.encoder(x_t, ei_t, ea_t, drop_prob=0.0)
     z_t = mu_t
-    pf_t = (
-        pair_features_from_x(x_t, pos_ei_t, mode=pair_mode) if use_pair_feats else None
-    )
+    pf_t = pair_features_from_x(x_t, pos_ei_t, mode=pair_mode) if use_pair_feats else None
     y_edge_hat_t = model.edge_dec(z_t, pos_ei_t, pf_t)
     y_node_hat_t = model.node_dec(z_t)
 
     def _np(t):
         return t.detach().cpu().numpy()
 
-    # --- VAL ---
+    # VAL
     e_true_v, e_pred_v = _np(y_edge_v), _np(y_edge_hat_v)
     n_true_v, n_pred_v = _np(y_node_v), _np(y_node_hat_v)
 
@@ -125,7 +119,7 @@ def evaluate_gtmvae(
         node_val_r2 = float("nan")
     node_val_sp = _spearman(n_true_v.ravel(), n_pred_v.ravel())
 
-    # --- TEST ---
+    # TEST
     e_true_t, e_pred_t = _np(y_edge_t), _np(y_edge_hat_t)
     n_true_t, n_pred_t = _np(y_node_t), _np(y_node_hat_t)
 
@@ -146,6 +140,7 @@ def evaluate_gtmvae(
     node_test_sp = _spearman(n_true_t.ravel(), n_pred_t.ravel())
 
     return {
+        # VAL
         "val_edge_rmse": edge_val_rmse,
         "val_edge_mae": edge_val_mae,
         "val_edge_r2": edge_val_r2,
@@ -154,6 +149,7 @@ def evaluate_gtmvae(
         "val_node_mae": node_val_mae,
         "val_node_r2": node_val_r2,
         "val_node_spearman": node_val_sp,
+        # TEST
         "test_edge_rmse": edge_test_rmse,
         "test_edge_mae": edge_test_mae,
         "test_edge_r2": edge_test_r2,
@@ -288,7 +284,7 @@ def run_gtmvae_gridsearch(
                 print_every=hp["print_every"],
                 epochs=hp["epochs"],
                 device=device,
-                # NUEVOS (VAE)
+                # NEW (VAE)
                 beta_kl=hp["beta_kl"],
                 kl_warmup=hp["kl_warmup"],
                 dbg_print=False,
@@ -326,9 +322,5 @@ def run_gtmvae_gridsearch(
             print(f"[*] ERROR: {e}")
             continue
 
-    df = (
-        pd.DataFrame(results)
-        .sort_values("score", ascending=True)
-        .reset_index(drop=True)
-    )
+    df = pd.DataFrame(results).sort_values("score", ascending=True).reset_index(drop=True)
     return df, best_model, best_Z

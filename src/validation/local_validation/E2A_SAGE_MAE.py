@@ -81,7 +81,7 @@ def run_sage_gridsearch(
     """
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-    # Targets: TODAS las columnas
+    # Targets
     target_cols = list(edge_attr_names)
     node_target_cols = list(node_feat_names)
 
@@ -134,7 +134,6 @@ def run_sage_gridsearch(
                 dbg_print=False,
             )
 
-            # Eval externa coherente con el mismo split
             metrics = evaluate_gtmae(
                 model=model,
                 data=data,
@@ -154,7 +153,7 @@ def run_sage_gridsearch(
             row["combo_idx"] = i
             row["seconds"] = round(time.time() - t0, 2)
 
-            # Score compuesto para ordenar
+            # Grouped score
             row["score"] = composite_score(row, *sort_weights)
             results.append(row)
 
@@ -170,9 +169,5 @@ def run_sage_gridsearch(
             print(f"[{desc}] ERROR: {e}")
             continue
 
-    df = (
-        pd.DataFrame(results)
-        .sort_values("score", ascending=True)
-        .reset_index(drop=True)
-    )
+    df = pd.DataFrame(results).sort_values("score", ascending=True).reset_index(drop=True)
     return df, best_model, best_Z

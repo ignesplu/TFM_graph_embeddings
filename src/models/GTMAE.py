@@ -92,14 +92,10 @@ class PreproGTMAE:
             Processed DataFrame with selected columns
         """
         mean_not_idea = [
-            col
-            for col in df.columns
-            if col.endswith("_mean") and not col.startswith("idea_")
+            col for col in df.columns if col.endswith("_mean") and not col.startswith("idea_")
         ]
         std_not_idea = [
-            col
-            for col in df.columns
-            if col.endswith("_std") and not col.startswith("idea_")
+            col for col in df.columns if col.endswith("_std") and not col.startswith("idea_")
         ]
         mean_xh_not_idea = [
             col
@@ -179,9 +175,7 @@ class PreproGTMAE:
         stat_cols = [c for c in tabu.columns if c != self.NODE_ID_COL]
         Xs = (
             pd.DataFrame({self.NODE_ID_COL: nodes})
-            .merge(
-                tabu[[self.NODE_ID_COL] + stat_cols], on=self.NODE_ID_COL, how="left"
-            )
+            .merge(tabu[[self.NODE_ID_COL] + stat_cols], on=self.NODE_ID_COL, how="left")
             .set_index(self.NODE_ID_COL)
         )
         if stat_cols:
@@ -195,9 +189,7 @@ class PreproGTMAE:
                 .copy()
                 .sort_values([self.NODE_ID_COL, self.YEAR_COL])
             )
-            tcols = [
-                c for c in tdf.columns if c not in (self.NODE_ID_COL, self.YEAR_COL)
-            ]
+            tcols = [c for c in tdf.columns if c not in (self.NODE_ID_COL, self.YEAR_COL)]
             if tcols:
                 last_t = (
                     tdf.groupby(self.NODE_ID_COL, as_index=True)
@@ -264,7 +256,6 @@ class PreproGTMAE:
 
         frames = []
 
-        # dirigidas
         if not mdir.empty:
             e_dir = mdir[[self.MDIR_SRC, self.MDIR_DST] + self.MDIR_WEIGHT_COLS].copy()
             e_dir["u"] = e_dir[self.MDIR_SRC].map(node2idx)
@@ -272,12 +263,9 @@ class PreproGTMAE:
             e_dir["edge_type"] = 0.0
             frames.append(e_dir[["u", "v"] + self.MDIR_WEIGHT_COLS + ["edge_type"]])
 
-        # no dirigidas -> duplicar
         if not mndi.empty:
             base = mndi[[self.MNDI_U, self.MNDI_V] + self.MNDI_WEIGHT_COLS].copy()
-            rev = base.rename(
-                columns={self.MNDI_U: self.MNDI_V, self.MNDI_V: self.MNDI_U}
-            )
+            rev = base.rename(columns={self.MNDI_U: self.MNDI_V, self.MNDI_V: self.MNDI_U})
             e_und = pd.concat([base, rev], ignore_index=True)
             e_und["u"] = e_und[self.MNDI_U].map(node2idx)
             e_und["v"] = e_und[self.MNDI_V].map(node2idx)
@@ -294,21 +282,16 @@ class PreproGTMAE:
         E = E.drop_duplicates()
 
         cont_cols = sorted(set(self.MDIR_WEIGHT_COLS + self.MNDI_WEIGHT_COLS))
-        binary_cols = []  # mueve aquí los 0/1 si tienes
-        extra_cols = ["edge_type"]  # no estandarizar
+        binary_cols, extra_cols = [], ["edge_type"]
 
         E = self._align_and_standardize_edge_attrs(
             E, cont_cols, binary_cols=binary_cols, extra_cols_keep=extra_cols
         )
 
         edge_index = torch.tensor(E[["u", "v"]].values.T, dtype=torch.long)
-        edge_attr = torch.tensor(
-            E[cont_cols + binary_cols + extra_cols].values, dtype=torch.float
-        )
+        edge_attr = torch.tensor(E[cont_cols + binary_cols + extra_cols].values, dtype=torch.float)
 
-        edge_is_undirected = torch.tensor(
-            E["edge_type"].values == 1.0, dtype=torch.bool
-        )
+        edge_is_undirected = torch.tensor(E["edge_type"].values == 1.0, dtype=torch.bool)
 
         data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
         data.num_nodes = x.size(0)
@@ -527,7 +510,6 @@ class EarlyStopper:
 
     def maybe_restore(self, model):
         """Restore best model weights if configured."""
-
         if self.restore_best and (self.best_state is not None):
             model.load_state_dict(self.best_state)
 
@@ -564,12 +546,8 @@ class EdgeAwareGCNEncoder(nn.Module):
             dropout: Dropout rate
         """
         super().__init__()
-        self.conv1 = TransformerConv(
-            in_ch, hid, heads=heads, edge_dim=edge_dim, dropout=dropout
-        )
-        self.conv2 = TransformerConv(
-            hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout
-        )
+        self.conv1 = TransformerConv(in_ch, hid, heads=heads, edge_dim=edge_dim, dropout=dropout)
+        self.conv2 = TransformerConv(hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout)
         self.dropout = dropout
 
     def forward(self, x, edge_index, edge_attr, drop_prob=0.2):
@@ -586,9 +564,7 @@ class EdgeAwareGCNEncoder(nn.Module):
             Node embeddings
         """
         if drop_prob > 0 and self.training:
-            edge_index, edge_mask = dropout_edge(
-                edge_index, p=drop_prob, training=self.training
-            )
+            edge_index, edge_mask = dropout_edge(edge_index, p=drop_prob, training=self.training)
             if edge_attr is not None:
                 edge_attr = edge_attr[edge_mask]
         x = self.conv1(x, edge_index, edge_attr)
@@ -616,12 +592,8 @@ class EdgeRegressor(nn.Module):
         """
         super().__init__()
         self.use_pair_feats = use_pair_feats
-        in_dim = 2 * z_dim + (
-            3 if use_pair_feats else 0
-        )  # 3 = pair_features_from_x default
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim)
-        )
+        in_dim = 2 * z_dim + (3 if use_pair_feats else 0)
+        self.mlp = nn.Sequential(nn.Linear(in_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim))
 
     def forward(self, z, edge_index, pair_feats=None):
         """
@@ -656,9 +628,7 @@ class NodeRegressor(nn.Module):
             hid: Hidden dimension
         """
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(z_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim)
-        )
+        self.mlp = nn.Sequential(nn.Linear(z_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim))
 
     def forward(self, z):
         """
@@ -819,7 +789,7 @@ def train_edge_node_multitask(
     Returns:
         Tuple of (trained model, node embeddings)
     """
-    # ---------- split de aristas ----------
+    # Split
     train_mask, val_mask, test_mask = grouped_undirected_split(
         data.edge_index,
         data.edge_is_undirected,
@@ -832,11 +802,9 @@ def train_edge_node_multitask(
         data, train_mask, val_mask, test_mask
     )
 
-    # Mapear objetivos de ARISTA
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
     edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
 
-    # Mapear objetivos de NODO sobre X
     node_target_idx = [node_feat_names.index(c) for c in node_target_cols]
     node_out_dim = len(node_target_idx)
 
@@ -847,7 +815,7 @@ def train_edge_node_multitask(
         print(f"[EDGE TARGETS] {target_cols} -> idx {edge_target_idx}")
         print(f"[NODE TARGETS] {node_target_cols} -> idx {node_target_idx}")
 
-    # ---------- modelo ----------
+    # Model
     class GTMultiModel(nn.Module):
         def __init__(self):
             super().__init__()
@@ -870,7 +838,7 @@ def train_edge_node_multitask(
     model = GTMultiModel().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Pérdidas
+    # Loss
     def _make_reg_loss(kind, delta):
         if kind == "huber":
             return nn.SmoothL1Loss(beta=delta)
@@ -894,7 +862,7 @@ def train_edge_node_multitask(
     x_va, ei_va, ea_va, pos_ei_va, y_edge_va = _to_dev(val_data)
     x_te, ei_te, ea_te, pos_ei_te, y_edge_te = _to_dev(test_data)
 
-    # Targets nodales (a partir de X original ya estandarizada)
+    # Node targets
     def _node_targets(x_tensor):
         # x_tensor: [N, F]; extrae columnas node_target_idx
         return x_tensor[:, node_target_idx]  # [N, Tn]
@@ -911,7 +879,7 @@ def train_edge_node_multitask(
         restore_best=restore_best,
     )
 
-    # ---- helpers ranking (edge) ----
+    # Helpers ranking (edge)
     def _ranking_loss(z, pos_ei, y_true, margin=0.1):
         with torch.no_grad():
             u = pos_ei[0].cpu().numpy()
@@ -944,7 +912,7 @@ def train_edge_node_multitask(
         s_neg = (zu * zvn).sum(dim=-1)
         return torch.clamp(margin - s_pos + s_neg, min=0.0).mean()
 
-    # ---- máscara anti-fuga para targets nodales (opcional) ----
+    # Anti-leak mask for nodal targets
     def _mask_node_inputs(x_tensor, rate):
         if rate <= 0:
             return x_tensor
@@ -960,28 +928,22 @@ def train_edge_node_multitask(
             x_masked[:, node_target_idx] = x_masked[:, node_target_idx] * m
         return x_masked
 
-    # --------------- TRAIN LOOP ---------------
+    # Train loop
     print("[TRAIN]")
     for ep in range(1, epochs + 1):
         model.train()
         opt.zero_grad()
 
-        # Enmascara SOLO columnas target nodales en la entrada de TRAIN
         x_tr_in = _mask_node_inputs(x_tr, node_mask_rate)
 
-        # Encoder con aristas de TRAIN
         z = model.encoder(x_tr_in, ei_tr, ea_tr, drop_prob=edge_drop_prob)
 
-        # ----- Edge head -----
-        pf_tr = (
-            pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        # Edge head
+        pf_tr = pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode) if use_pair_feats else None
         y_edge_hat = model.edge_dec(z, pos_ei_tr, pf_tr)  # [Es, Te]
         edge_reg_loss = edge_loss_fn(y_edge_hat, y_edge_tr)
 
-        # ----- Node head -----
+        # Node head
         y_node_hat = model.node_dec(z)  # [N, Tn]
         node_reg_loss = (
             node_loss_fn(y_node_hat, y_node_tr)
@@ -989,7 +951,7 @@ def train_edge_node_multitask(
             else torch.tensor(0.0, device=z.device)
         )
 
-        # ----- Ranking opcional (edge) -----
+        # Ranking
         if add_ranking:
             rank_loss = _ranking_loss(z, pos_ei_tr, y_edge_tr, margin=margin)
         else:
@@ -1003,22 +965,21 @@ def train_edge_node_multitask(
         loss.backward()
         opt.step()
 
-        # ---- VALIDACIÓN ----
+        # Validation
         model.eval()
         with torch.no_grad():
             z_va = model.encoder(x_va, ei_va, ea_va, drop_prob=0.0)
 
             # Edge val
             pf_va = (
-                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode)
-                if use_pair_feats
-                else None
+                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode) if use_pair_feats else None
             )
             y_edge_hat_va = model.edge_dec(z_va, pos_ei_va, pf_va)
-            # Node val (sin máscara)
+
+            # Node val
             y_node_hat_va = model.node_dec(z_va) if node_out_dim > 0 else None
 
-            # Métricas EDGE
+            # EDGE Metrics
             y_edge_va_np = y_edge_va.detach().cpu().numpy()
             y_edge_hat_va_np = y_edge_hat_va.detach().cpu().numpy()
             edge_val_rmse = _rmse(y_edge_va_np, y_edge_hat_va_np)
@@ -1026,7 +987,7 @@ def train_edge_node_multitask(
             edge_val_spr = _spearman(y_edge_va_np.ravel(), y_edge_hat_va_np.ravel())
             edge_val_r2 = _r2(y_edge_va_np, y_edge_hat_va_np)
 
-            # Métricas NODE
+            # NODE Metrics
             if node_out_dim > 0:
                 y_node_va_np = y_node_va.detach().cpu().numpy()
                 y_node_hat_va_np = y_node_hat_va.detach().cpu().numpy()
@@ -1046,63 +1007,49 @@ def train_edge_node_multitask(
             )
             print(log)
 
-        # ---- early stopping según 'monitor' ----
+        # Early stopping by monitor
         if monitor == "val_edge_rmse":
             score, es.mode = edge_val_rmse, "min"
         elif monitor == "val_edge_mae":
             score, es.mode = edge_val_mae, "min"
         elif monitor == "val_edge_spr":
-            score, es.mode = (
-                edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9), "max"
         elif monitor == "val_node_rmse":
             score, es.mode = node_val_rmse, "min"
         elif monitor == "val_node_mae":
             score, es.mode = node_val_mae, "min"
         else:
-            score, es.mode = (
-                node_val_spr if not (node_val_spr != node_val_spr) else -1e9
-            ), "max"
+            score, es.mode = (node_val_spr if not (node_val_spr != node_val_spr) else -1e9), "max"
 
         if es.step(score, model):
             if print_every:
-                print(
-                    f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f})."
-                )
+                print(f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f}).")
             break
 
     es.maybe_restore(model)
 
-    # ---- Embeddings finales en el grafo COMPLETO ----
+    # Final embeddings
     model.eval()
     with torch.no_grad():
         Z = model.encoder(
             data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)
         ).cpu()
 
-    # ---- TEST ----
+    # Test
     with torch.no_grad():
         # EDGE
         z_te = model.encoder(x_te, ei_te, ea_te, drop_prob=0.0)
-        pf_te = (
-            pair_features_from_x(x_te, pos_ei_te, mode=pair_mode)
-            if use_pair_feats
-            else None
-        )
+        pf_te = pair_features_from_x(x_te, pos_ei_te, mode=pair_mode) if use_pair_feats else None
         y_edge_hat_te = model.edge_dec(z_te, pos_ei_te, pf_te)
         edge_test_rmse = _rmse(
             y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
         )
-        edge_test_mae = _mae(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_mae = _mae(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
         edge_test_spr = _spearman(
             y_edge_te.detach().cpu().numpy().ravel(),
             y_edge_hat_te.detach().cpu().numpy().ravel(),
         )
-        edge_test_r2 = _r2(
-            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
-        )
+        edge_test_r2 = _r2(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
         # NODE
         y_node_hat_te = model.node_dec(z_te) if node_out_dim > 0 else None
         if node_out_dim > 0:

@@ -55,7 +55,7 @@ def evaluate_gtmae(
         Dictionary containing validation and test metrics for both edge and node tasks
     """
     model.eval()
-    # Rehacer splits como en train
+
     train_mask, val_mask, test_mask = grouped_undirected_split(
         data.edge_index,
         data.edge_is_undirected,
@@ -64,9 +64,7 @@ def evaluate_gtmae(
         test_ratio=test_ratio,
         seed=seed,
     )
-    train_data, val_data, test_data = make_supervised_edge_splits(
-        data, train_mask, val_mask, test_mask
-    )
+    _, val_data, test_data = make_supervised_edge_splits(data, train_mask, val_mask, test_mask)
 
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
     edge_target_idx = [all_edge_cols.index(c) for c in target_cols]
@@ -78,33 +76,28 @@ def evaluate_gtmae(
         ea = split.edge_attr.to(device)
         pos_ei = split.pos_edge_label_index.to(device)
         y_edge = split.pos_edge_attr.to(device)[:, edge_target_idx]  # [E, Te]
-        # Node targets desde X estandarizado:
         y_node = x[:, node_target_idx]  # [N, Tn]
         return x, ei, ea, pos_ei, y_edge, y_node
 
     # VAL
     x_v, ei_v, ea_v, pos_ei_v, y_edge_v, y_node_v = _prepare(val_data)
     z_v = model.encoder(x_v, ei_v, ea_v, drop_prob=0.0)
-    pf_v = (
-        pair_features_from_x(x_v, pos_ei_v, mode=pair_mode) if use_pair_feats else None
-    )
+    pf_v = pair_features_from_x(x_v, pos_ei_v, mode=pair_mode) if use_pair_feats else None
     y_edge_hat_v = model.edge_dec(z_v, pos_ei_v, pf_v)
     y_node_hat_v = model.node_dec(z_v)
 
     # TEST
     x_t, ei_t, ea_t, pos_ei_t, y_edge_t, y_node_t = _prepare(test_data)
     z_t = model.encoder(x_t, ei_t, ea_t, drop_prob=0.0)
-    pf_t = (
-        pair_features_from_x(x_t, pos_ei_t, mode=pair_mode) if use_pair_feats else None
-    )
+    pf_t = pair_features_from_x(x_t, pos_ei_t, mode=pair_mode) if use_pair_feats else None
     y_edge_hat_t = model.edge_dec(z_t, pos_ei_t, pf_t)
     y_node_hat_t = model.node_dec(z_t)
 
-    # Métricas (convertimos a numpy)
+    # Metrics
     def _np(t):
         return t.detach().cpu().numpy()
 
-    # --- VAL ---
+    # VAL
     e_true_v, e_pred_v = _np(y_edge_v), _np(y_edge_hat_v)
     n_true_v, n_pred_v = _np(y_node_v), _np(y_node_hat_v)
 
@@ -124,7 +117,7 @@ def evaluate_gtmae(
         node_val_r2 = float("nan")
     node_val_sp = _spearman(n_true_v.ravel(), n_pred_v.ravel())
 
-    # --- TEST ---
+    # TEST
     e_true_t, e_pred_t = _np(y_edge_t), _np(y_edge_hat_t)
     n_true_t, n_pred_t = _np(y_node_t), _np(y_node_hat_t)
 
@@ -184,16 +177,16 @@ def default_gtmae_param_grid():
         "lr": [1e-3, 5e-4],
         "weight_decay": [1e-5, 1e-4],
         "edge_drop_prob": [0.0, 0.2],
-        "edge_loss_type": ["huber"],  # ["huber","mse"] si quieres ampliar
+        "edge_loss_type": ["huber"],  # ["huber", "mse"]
         "edge_huber_delta": [1.0],
         "node_loss_type": ["huber"],
         "node_huber_delta": [1.0],
         "lambda_node": [0.25, 0.5, 1.0],
         "node_mask_rate": [0.0, 0.2],
         "add_ranking": [False, True],
-        "lambda_rank": [0.3],  # usado si add_ranking=True
+        "lambda_rank": [0.3],  # used only if add_ranking=True
         "margin": [0.1],
-        "monitor": ["val_edge_rmse"],  # o "val_node_rmse", "val_edge_spearman", etc.
+        "monitor": ["val_edge_rmse"],  # ["val_node_rmse", "val_edge_spearman", ...]
         "patience": [30],
         "min_delta": [0.0],
         "val_ratio": [0.2],
@@ -322,7 +315,6 @@ def run_gtmae_gridsearch(
                 dbg_print=False,
             )
 
-            # Eval externa coherente con el mismo split
             metrics = evaluate_gtmae(
                 model=model,
                 data=data,
@@ -342,7 +334,7 @@ def run_gtmae_gridsearch(
             row["combo_idx"] = i
             row["seconds"] = round(time.time() - t0, 2)
 
-            # Score compuesto para ordenar
+            # Grouped score
             row["score"] = composite_score(row, *sort_weights)
             results.append(row)
 
@@ -358,9 +350,5 @@ def run_gtmae_gridsearch(
             print(f"[{desc}] ERROR: {e}")
             continue
 
-    df = (
-        pd.DataFrame(results)
-        .sort_values("score", ascending=True)
-        .reset_index(drop=True)
-    )
+    df = pd.DataFrame(results).sort_values("score", ascending=True).reset_index(drop=True)
     return df, best_model, best_Z
