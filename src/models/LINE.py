@@ -504,9 +504,9 @@ def train_line(
     return model
 
 
-# +----------------------------+
-# |  ENTRENAMIENTO PRINCIPAL   |
-# +----------------------------+
+# +---------+
+# |  TRAIN  |
+# +---------+
 
 
 def full_train_line(

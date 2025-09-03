@@ -29,7 +29,7 @@ def _no_mad_prepro(tabu, temp, mdir, mndi, no_mad: bool = False):
     return tabu, temp, mdir, mndi
 
 
-def _add_idea_emb_func(df, add_idea_emb : bool):
+def _add_idea_emb_func(df, add_idea_emb: bool):
     if add_idea_emb:
         idea_cols = []
     else:
@@ -39,7 +39,9 @@ def _add_idea_emb_func(df, add_idea_emb : bool):
     return df.drop(idea_cols, axis=1)
 
 
-def global_prepro(tabu, temp, mdir, mndi, no_mad: bool = False, add_idea_emb : bool = True):
+def global_prepro(
+    tabu, temp, mdir, mndi, no_mad: bool = False, add_idea_emb: bool = True
+):
 
     mndi = _infer_matrix_null_values(mndi)
     tabu = _add_idea_emb_func(tabu, add_idea_emb)
