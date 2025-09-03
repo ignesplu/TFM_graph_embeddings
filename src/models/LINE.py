@@ -16,27 +16,50 @@ from .utils import global_prepro
 # |  PREPROCESSING  |
 # +-----------------+
 
+
 class PreproLINE:
+    """
+    Preprocessor for LINE (Large-scale Information Network Embedding) model.
+
+    Handles data preprocessing, feature engineering, and graph construction
+    from tabular and temporal data for subsequent LINE model training.
+    """
 
     def __init__(
-            self,
-            add_idea_emb: bool = True,
-            no_mad: bool = False,
-            year: int = 2022
+        self, add_idea_emb: bool = True, no_mad: bool = False, year: int = 2022
     ):
+        """
+        Initialize the LINE preprocessor.
+
+        Args:
+            add_idea_emb: Whether to add idea embeddings to the data
+            no_mad: Whether to exclude Madrid from the data
+            year: The year to use for temporal data filtering
+        """
         self.add_idea_emb = add_idea_emb
         self.no_mad = no_mad
         self.year = year
 
     def _prepro_tabular_data(
-            self,
-            tabu: pd.DataFrame,
-            temp: pd.DataFrame,
+        self,
+        tabu: pd.DataFrame,
+        temp: pd.DataFrame,
     ):
+        """
+        Preprocess tabular and temporal data for LINE model.
 
+        Args:
+            tabu: DataFrame containing tabular data
+            temp: DataFrame containing temporal data
+
+        Returns:
+            Tuple of (processed DataFrame, auxiliary columns dictionary)
+        """
         # Tabular Static Columns
         tabu_idea_cols = [col for col in tabu.columns if col.startswith("idea_")]
-        tabu_colinda_cols = [col for col in tabu.columns if col.startswith("colinda_con")]
+        tabu_colinda_cols = [
+            col for col in tabu.columns if col.startswith("colinda_con")
+        ]
         tabu_other_cols = [
             "cc",
             "superficie",
@@ -49,15 +72,21 @@ class PreproLINE:
 
         # Tabular Temporal Columns
         temp_cols = ["cc", "geo_dens_poblacion", "y_edad_media", "p_feminidad"] + [
-            col for col in temp.columns if (col.endswith("por_hab") | col.endswith("_xhab"))
+            col
+            for col in temp.columns
+            if (col.endswith("por_hab") | col.endswith("_xhab"))
         ]
         temp_line = temp[temp.year == self.year][temp_cols]
 
         # Unify + Columns
         line_cols = temp_cols + tabu_idea_cols + tabu_colinda_cols + tabu_other_cols
-        not_in_line = list(set(tabu.columns.tolist() + temp.columns.tolist()) - set(line_cols))
+        not_in_line = list(
+            set(tabu.columns.tolist() + temp.columns.tolist()) - set(line_cols)
+        )
 
-        full_tabu_df = temp_line.set_index("cc").join(tabu_line.set_index("cc")).reset_index()
+        full_tabu_df = (
+            temp_line.set_index("cc").join(tabu_line.set_index("cc")).reset_index()
+        )
         aux_cols = {
             "num_cols": temp_cols + tabu_idea_cols + tabu_other_cols,
             "not_in_line": not_in_line,
@@ -65,33 +94,24 @@ class PreproLINE:
 
         return full_tabu_df, aux_cols
 
-    def ratios_cc(
-            self,
-            df: pd.DataFrame,
-            num_tabu_cols: list,
-            cc_col: str = "cc",
-            both_directions: bool = False,
+    def _ratios_cc(
+        self,
+        df: pd.DataFrame,
+        num_tabu_cols: list,
+        cc_col: str = "cc",
+        both_directions: bool = False,
     ) -> pd.DataFrame:
         """
-        Calcula ratios entre todas las combinaciones 2 a 2 de los diferentes 'cc'.
+        Calculate ratios between all pairwise combinations of different 'cc' values.
 
-        Parámetros
-        ----------
-        df : pd.DataFrame
-            DataFrame original con una columna identificadora (por defecto 'cc') y columnas de valores.
-        num_tabu_cols : list
-            Listado de columnas numéricas tabulares.
-        cc_col : str, default 'cc'
-            Nombre de la columna identificadora.
-        both_directions : bool, default False
-            Si True, devuelve también la pareja inversa (cc_destino, cc_origen) con el ratio inverso.
-            Si False, solo devuelve combinaciones (no permutaciones), i.e., una sola fila por pareja.
+        Args:
+            df: Original DataFrame with identifier column and value columns
+            num_tabu_cols: List of numerical tabular columns
+            cc_col: Name of the identifier column (default 'cc')
+            both_directions: Whether to return inverse pairs with inverse ratios
 
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame con columnas: cc_origen, cc_destino, ratio_<col> para cada col.
-            Ratios inf o -inf se convierten a 0, ya que se interpreta que ningún lado aporta.
+        Returns:
+            DataFrame with columns: cc_origen, cc_destino, ratio_<col> for each column
         """
         base = df.copy()
         value_cols = list(set(base.columns) - set(["cc"]))
@@ -139,7 +159,9 @@ class PreproLINE:
             else:
                 # Jaccard Binario (simétrico)
                 pairs[f"ratio_{col}"] = pairs.apply(
-                    lambda row: jaccard_binario(row[f"{col}_origen"], row[f"{col}_destino"]),
+                    lambda row: jaccard_binario(
+                        row[f"{col}_origen"], row[f"{col}_destino"]
+                    ),
                     axis=1,
                 )
 
@@ -152,13 +174,27 @@ class PreproLINE:
         return out
 
     def run(
-            self,
-            tabu: pd.DataFrame,
-            temp: pd.DataFrame,
-            mdir: pd.DataFrame,
-            mndi: pd.DataFrame,
+        self,
+        tabu: pd.DataFrame,
+        temp: pd.DataFrame,
+        mdir: pd.DataFrame,
+        mndi: pd.DataFrame,
     ):
-        tabu, temp, mdir, mndi = global_prepro(tabu, temp, mdir, mndi, no_mad=self.no_mad, add_idea_emb=self.add_idea_emb)
+        """
+        Execute the full preprocessing pipeline for LINE model.
+
+        Args:
+            tabu: Tabular data DataFrame
+            temp: Temporal data DataFrame
+            mdir: Direct migration data DataFrame
+            mndi: Indirect migration data DataFrame
+
+        Returns:
+            Tuple of four DataFrames with different aggregation methods
+        """
+        tabu, temp, mdir, mndi = global_prepro(
+            tabu, temp, mdir, mndi, no_mad=self.no_mad, add_idea_emb=self.add_idea_emb
+        )
 
         tabu_df, aux_cols = self._prepro_tabular_data(tabu, temp)
 
@@ -181,20 +217,38 @@ class PreproLINE:
                 df_col = df_line[col].copy()
                 # MMS Scaling
                 scaler = MinMaxScaler()
-                df_line[f"mms_{col}"] = scaler.fit_transform(df_col.values.reshape(-1, 1))
+                df_line[f"mms_{col}"] = scaler.fit_transform(
+                    df_col.values.reshape(-1, 1)
+                )
                 # R Scaling
                 df_line[f"rank_{col}"] = df_col.rank(method="average", ascending=False)
 
-        df_line_mms = df_line[["cc_origen", "cc_destino"] + [col for col in df_line.columns if col.startswith("mms")]]
-        df_line_r = df_line[["cc_origen", "cc_destino"] + [col for col in df_line.columns if col.startswith("r")]]
+        df_line_mms = df_line[
+            ["cc_origen", "cc_destino"]
+            + [col for col in df_line.columns if col.startswith("mms")]
+        ]
+        df_line_r = df_line[
+            ["cc_origen", "cc_destino"]
+            + [col for col in df_line.columns if col.startswith("r")]
+        ]
 
-        df_line_mms_mean = df_line_mms.set_index(["cc_origen", "cc_destino"]).mean(axis=1).reset_index()
+        df_line_mms_mean = (
+            df_line_mms.set_index(["cc_origen", "cc_destino"])
+            .mean(axis=1)
+            .reset_index()
+        )
         df_line_mms_mean.columns = ["cc_origen", "cc_destino", "value"]
-        df_line_mms_sum = df_line_mms.set_index(["cc_origen", "cc_destino"]).sum(axis=1).reset_index()
+        df_line_mms_sum = (
+            df_line_mms.set_index(["cc_origen", "cc_destino"]).sum(axis=1).reset_index()
+        )
         df_line_mms_sum.columns = ["cc_origen", "cc_destino", "value"]
-        df_line_r_mean = df_line_r.set_index(["cc_origen", "cc_destino"]).mean(axis=1).reset_index()
+        df_line_r_mean = (
+            df_line_r.set_index(["cc_origen", "cc_destino"]).mean(axis=1).reset_index()
+        )
         df_line_r_mean.columns = ["cc_origen", "cc_destino", "value"]
-        df_line_r_sum = df_line_r.set_index(["cc_origen", "cc_destino"]).sum(axis=1).reset_index()
+        df_line_r_sum = (
+            df_line_r.set_index(["cc_origen", "cc_destino"]).sum(axis=1).reset_index()
+        )
         df_line_r_sum.columns = ["cc_origen", "cc_destino", "value"]
 
         return df_line_mms_mean, df_line_mms_sum, df_line_r_mean, df_line_r_sum
@@ -207,15 +261,23 @@ class PreproLINE:
 
 class LINEModel(nn.Module):
     """
-    Implementación mínima del modelo LINE.
-    - mode='first'  -> proximidad de primer orden (aristas directas)
-    - mode='second' -> proximidad de segundo orden (vecindarios)
+    Minimal implementation of the LINE (Large-scale Information Network Embedding) model.
+    Supports both first-order (direct edges) and second-order (neighborhood) proximity.
     """
 
     def __init__(self, num_nodes: int, dim: int, mode: str = "first"):
+        """
+        Initialize the LINE model.
+
+        Args:
+            num_nodes: Number of nodes in the graph
+            dim: Dimension of the output embeddings
+            mode: Proximity mode - 'first' for direct edges, 'second' for neighborhoods
+        """
         super().__init__()
         assert mode in ("first", "second")
         self.mode = mode
+
         # Embeddings principales (target nodes)
         self.target = nn.Embedding(num_nodes, dim)
         nn.init.xavier_uniform_(self.target.weight)  # inicialización
@@ -229,10 +291,15 @@ class LINEModel(nn.Module):
 
     def forward(self, src, dst, negs):
         """
-        src: nodos origen [B]
-        dst: nodos destino (positivos) [B]
-        negs: nodos destino negativos [B,K]
-        Devuelve la loss de un batch.
+        Forward pass for the LINE model.
+
+        Args:
+            src: Source nodes [B]
+            dst: Destination (positive) nodes [B]
+            negs: Negative destination nodes [B,K]
+
+        Returns:
+            Batch loss value
         """
         if self.mode == "first":
             v_src = self.target(src)  # embedding del origen
@@ -254,17 +321,30 @@ class LINEModel(nn.Module):
         return pos_loss + neg_loss
 
     def get_embeddings(self):
-        """Devuelve los embeddings aprendidos de los nodos (matriz N x d)."""
+        """
+        Get the learned node embeddings.
+
+        Returns:
+            N x d matrix of node embeddings
+        """
         return self.target.weight.detach().cpu().numpy()
 
 
 class EdgeSampler:
     """
-    Permite muestrear aristas con probabilidad proporcional a su peso.
-    Implementa el alias method para hacerlo eficiente.
+    Samples edges with probability proportional to their weight.
+    Implements the alias method for efficient sampling.
     """
 
     def __init__(self, src, dst, weights):
+        """
+        Initialize the edge sampler.
+
+        Args:
+            src: Source nodes array
+            dst: Destination nodes array
+            weights: Edge weights array
+        """
         self.src = src.astype(np.int64)
         self.dst = dst.astype(np.int64)
         w = np.maximum(weights.astype(np.float64), 1e-12)  # evitar ceros
@@ -273,7 +353,23 @@ class EdgeSampler:
     @staticmethod
     def _alias_setup(prob):
         """
-        Construcción del alias table para muestreo O(1).
+        Construct an alias table for O(1) sampling using the alias method.
+
+        This method sets up the data structures needed for efficient sampling
+        from a discrete probability distribution. It creates an alias table
+        that allows sampling in constant time after the initial setup.
+
+        Based on the algorithm described in:
+        "A Linear Time Algorithm for Generating Random Numbers with a Given Distribution"
+        by Michael Vose.
+
+        Args:
+            prob: A 1D numpy array of probabilities that sum to 1
+
+        Returns:
+            tuple: A tuple containing two arrays:
+                - prob_scaled: Modified probability array
+                - alias: Alias table where each entry points to another outcome
         """
         n = len(prob)
         alias = np.zeros(n, dtype=np.int64)
@@ -293,8 +389,13 @@ class EdgeSampler:
 
     def sample(self, batch_size):
         """
-        Devuelve un lote de (src,dst) de tamaño batch_size
-        usando alias sampling.
+        Sample a batch of edges.
+
+        Args:
+            batch_size: Number of edges to sample
+
+        Returns:
+            Tuple of (source nodes, destination nodes) arrays
         """
         n = len(self.prob)
         kk = np.random.randint(0, n, size=batch_size)
@@ -305,9 +406,15 @@ class EdgeSampler:
 
 def build_graph(df: pd.DataFrame, undirected: bool = False):
     """
-    Convierte el DataFrame de aristas en arrays listos para entrenar.
-    - df: con columnas cc_origen, cc_destino, value
-    - undirected=True: duplica aristas (u,v) y (v,u)
+    Convert edge DataFrame into arrays ready for training.
+
+    Args:
+        df: DataFrame with columns cc_origen, cc_destino, value
+        undirected: Whether to duplicate edges in both directions
+
+    Returns:
+        Tuple of (nodes, id2idx mapping, number of nodes, source array,
+                 destination array, weight array)
     """
     # Crear índice de nodos (0..N-1)
     nodes = pd.Index(pd.unique(df[["cc_origen", "cc_destino"]].values.ravel()))
@@ -352,7 +459,24 @@ def train_line(
     print_bool: bool,
 ):
     """
-    Entrena LINE en modo 'first' o 'second'.
+    Train LINE model in either 'first' or 'second' order mode.
+
+    Args:
+        num_nodes: Number of nodes in the graph
+        src: Source nodes array
+        dst: Destination nodes array
+        w: Edge weights array
+        dim: Embedding dimension
+        epochs: Number of training epochs
+        batch_size: Training batch size
+        neg: Number of negative samples
+        lr: Learning rate
+        device: Device to train on (CPU/GPU)
+        mode: Training mode - 'first' or 'second'
+        print_bool: Whether to print training progress
+
+    Returns:
+        Trained LINE model
     """
     model = LINEModel(num_nodes, dim, mode).to(device)
     opt = Adam(model.parameters(), lr=lr)
@@ -385,7 +509,6 @@ def train_line(
 # +----------------------------+
 
 
-
 def full_train_line(
     device,
     df: pd.DataFrame,
@@ -397,7 +520,23 @@ def full_train_line(
     lr: float = 0.0025,
     print_bool: bool = False,
 ) -> pd.DataFrame:
+    """
+    Complete training pipeline for LINE model with both first and second order proximities.
 
+    Args:
+        device: Device to train on (CPU/GPU)
+        df: Input DataFrame with edge information
+        undirected: Whether the graph is undirected
+        emb_dim: Total embedding dimension
+        n_epochs: Number of training epochs
+        batch_size: Training batch size
+        neg: Number of negative samples
+        lr: Learning rate
+        print_bool: Whether to print training progress
+
+    Returns:
+        DataFrame with learned node embeddings
+    """
     # Construir grafo y arrays
     nodes, _, num_nodes, e_src, e_dst, w = build_graph(df, undirected=undirected)
 

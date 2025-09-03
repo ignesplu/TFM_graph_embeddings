@@ -26,6 +26,23 @@ def validation_emb(
     pref_X: str = "emb_",
     node_id_col: str = "cc",
 ):
+    """
+    Validate embeddings by training multiple regression models and evaluating their performance.
+
+    This function performs a comprehensive validation of node embeddings by training
+    four different regression models (Linear Regression, XGBoost, Random Forest, and SVR)
+    and calculating their RMSE scores on a test set.
+
+    Args:
+        raw_df: Original DataFrame containing target values and node identifiers
+        target_col: Name of the target column to predict
+        emb_df: DataFrame containing the node embeddings
+        pref_X: Prefix for embedding column names (default: "emb_")
+        node_id_col: Name of the node identifier column (default: "cc")
+
+    Returns:
+        tuple: RMSE scores for (Linear Regression, XGBoost, Random Forest, SVR)
+    """
     # --------------------------
     # 0) Semillas y control de hilos
     # --------------------------
@@ -100,11 +117,16 @@ def validation_emb(
 
 def expand_grid(param_dict: dict):
     """
-    Genera todas las combinaciones posibles de un grid de hiperparámetros.
+    Generate all possible combinations of hyperparameters from a parameter dictionary.
 
-    param_dict: dict
+    Creates a comprehensive grid of hyperparameter combinations for grid search
+    by computing the Cartesian product of all parameter values.
 
-    return: lista de diccionarios, cada uno con una combinación
+    Args:
+        param_dict: Dictionary where keys are parameter names and values are lists of possible values
+
+    Returns:
+        list: List of dictionaries, each representing a unique parameter combination
     """
     keys = list(param_dict.keys())
     values = [param_dict[k] for k in keys]
@@ -129,7 +151,30 @@ def gridsearch_params(
     add_idea_emb: bool = True,
     no_mad: bool = False,
 ) -> pd.DataFrame:
+    """
+    Perform comprehensive grid search for LINE model hyperparameter optimization.
 
+    This function executes a full grid search across multiple hyperparameter combinations,
+    trains LINE models with different configurations, and evaluates their performance
+    using multiple regression models and validation metrics. It aggregates results
+    and calculates weighted rankings to identify optimal parameter settings.
+
+    Args:
+        device: Torch device (CPU/GPU) for model training
+        tabu: Tabular data DataFrame
+        temp: Temporal data DataFrame
+        mdir: Direct migration data DataFrame
+        mndi: Indirect migration data DataFrame
+        gs_dict: Dictionary of hyperparameters to search (uses default if None)
+        validation_cols: List of target columns for validation
+        n_loops: Number of training loops for each configuration
+        add_idea_emb: Whether to add idea embeddings
+        no_mad: Whether to exclude Madrid from data
+
+    Returns:
+        pd.DataFrame: Comprehensive results DataFrame sorted by overall ranking,
+                      containing RMSE scores and rankings for all configurations
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Input Data
@@ -163,7 +208,9 @@ def gridsearch_params(
                     print(i, "-", name, "-", output_col, "-", params)
 
                     # Train
-                    emb_df = full_train_line(device=device, df=df_m.copy()).rename(columns={"node_id": "cc"})
+                    emb_df = full_train_line(device=device, df=df_m.copy()).rename(
+                        columns={"node_id": "cc"}
+                    )
                     # Validation Metrics
                     lr_rmse, xgb_rmse, rf_rmse, svr_rmse = validation_emb(
                         tabu,
@@ -299,10 +346,14 @@ def gridsearch_params(
     ]
     # Ranking Metrics
     for rmse in list_rmse:
-        val_final[f"rank_{rmse}"] = val_final[rmse].rank(method="average", ascending=True)
+        val_final[f"rank_{rmse}"] = val_final[rmse].rank(
+            method="average", ascending=True
+        )
 
     # Rank Mean
-    val_final["rank_mean"] = val_final[[col for col in val_final.columns if col.startswith("rank_")]].mean(axis=1)
+    val_final["rank_mean"] = val_final[
+        [col for col in val_final.columns if col.startswith("rank_")]
+    ].mean(axis=1)
 
     weights = {"_xgb": 0.40, "_rf": 0.25, "_svr": 0.20, "_lr": 0.15}
 

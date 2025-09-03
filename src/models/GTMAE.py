@@ -18,28 +18,56 @@ from .utils import global_prepro
 # |  PREPROCESSING  |
 # +-----------------+
 
+
 class PreproGTMAE:
     """
-    Preprocesa tabular/temporal y construye un grafo dirigido con:
-      - mdir: aristas dirigidas tal cual
-      - mndi: se duplican ambas direcciones
-    edge_attr incluye columnas continuas estandarizadas + edge_type (0=dir,1=no-dir)
+    Preprocesses tabular/temporal data and constructs a directed graph.
+
+    Handles data preparation for GTMAE model, including node feature engineering,
+    edge attribute standardization, and graph construction with both directed
+    and undirected edges.
     """
+
     def __init__(
-            self,
-            NODE_ID_COL: str = "cc",
-            MDIR_SRC: str = "cc_origen",
-            MDIR_DST: str = "cc_destino",
-            MDIR_WEIGHT_COLS: list = ["distancia_carretera"],
-            MNDI_U : str = "cc_origen",
-            MNDI_V : str = "cc_destino",
-            MNDI_WEIGHT_COLS : list = ['distancia_vuelo_pajaro', 'bool_colindan_cc', 'n_grado_union_metro', 'n_grado_union_cercanias', 'n_grado_union_buses_EMT', 'n_grado_union_buses_urb', 'n_grado_union_buses_int'],
-            YEAR_COL : str = "year",
-            TARGET_YEAR : int = 2022,
-            EPS : float = 1e-9,
-            add_idea_emb: bool = True,
-            no_mad: bool = False,
+        self,
+        NODE_ID_COL: str = "cc",
+        MDIR_SRC: str = "cc_origen",
+        MDIR_DST: str = "cc_destino",
+        MDIR_WEIGHT_COLS: list = ["distancia_carretera"],
+        MNDI_U: str = "cc_origen",
+        MNDI_V: str = "cc_destino",
+        MNDI_WEIGHT_COLS: list = [
+            "distancia_vuelo_pajaro",
+            "bool_colindan_cc",
+            "n_grado_union_metro",
+            "n_grado_union_cercanias",
+            "n_grado_union_buses_EMT",
+            "n_grado_union_buses_urb",
+            "n_grado_union_buses_int",
+        ],
+        YEAR_COL: str = "year",
+        TARGET_YEAR: int = 2022,
+        EPS: float = 1e-9,
+        add_idea_emb: bool = True,
+        no_mad: bool = False,
     ):
+        """
+        Initialize the GTMAE preprocessor.
+
+        Args:
+            NODE_ID_COL: Column name for node identifiers
+            MDIR_SRC: Source column for directed edges
+            MDIR_DST: Destination column for directed edges
+            MDIR_WEIGHT_COLS: Weight columns for directed edges
+            MNDI_U: First node column for undirected edges
+            MNDI_V: Second node column for undirected edges
+            MNDI_WEIGHT_COLS: Weight columns for undirected edges
+            YEAR_COL: Column name for year data
+            TARGET_YEAR: Target year for temporal filtering
+            EPS: Epsilon value for numerical stability
+            add_idea_emb: Whether to add idea embeddings
+            no_mad: Whether to exclude Madrid from data
+        """
         self.NODE_ID_COL = NODE_ID_COL
         self.MDIR_SRC = MDIR_SRC
         self.MDIR_DST = MDIR_DST
@@ -54,16 +82,59 @@ class PreproGTMAE:
         self.no_mad = no_mad
 
     def _prepro_tabular_data(self, df):
-        mean_not_idea = [col for col in df.columns if col.endswith('_mean') and not col.startswith('idea_')]
-        std_not_idea = [col for col in df.columns if col.endswith('_std') and not col.startswith('idea_')]
-        mean_xh_not_idea = [col for col in df.columns if col.endswith('_mean_por_hab') and not col.startswith('idea_')]
-        std_xh_not_idea = [col for col in df.columns if col.endswith('_std_por_hab') and not col.startswith('idea_')]
-        drop_cols = ['geometry', 'localizacion'] + mean_not_idea + std_not_idea + mean_xh_not_idea + std_xh_not_idea
+        """
+        Preprocess tabular data by removing unnecessary columns.
+
+        Args:
+            df: Input DataFrame with tabular data
+
+        Returns:
+            Processed DataFrame with selected columns
+        """
+        mean_not_idea = [
+            col
+            for col in df.columns
+            if col.endswith("_mean") and not col.startswith("idea_")
+        ]
+        std_not_idea = [
+            col
+            for col in df.columns
+            if col.endswith("_std") and not col.startswith("idea_")
+        ]
+        mean_xh_not_idea = [
+            col
+            for col in df.columns
+            if col.endswith("_mean_por_hab") and not col.startswith("idea_")
+        ]
+        std_xh_not_idea = [
+            col
+            for col in df.columns
+            if col.endswith("_std_por_hab") and not col.startswith("idea_")
+        ]
+        drop_cols = (
+            ["geometry", "localizacion"]
+            + mean_not_idea
+            + std_not_idea
+            + mean_xh_not_idea
+            + std_xh_not_idea
+        )
         drop_cols = [c for c in drop_cols if c in df.columns]
         new_df = df.drop(drop_cols, axis=1)
         return new_df
 
     def _nodes_union(self, tabu, temp, mdir, mndi):
+        """
+        Create unified node set from all data sources.
+
+        Args:
+            tabu: Tabular data
+            temp: Temporal data
+            mdir: Directed edge data
+            mndi: Undirected edge data
+
+        Returns:
+            Tuple of (sorted node list, node to index mapping)
+        """
         nodes = set()
         if self.NODE_ID_COL in tabu.columns:
             nodes |= set(tabu[self.NODE_ID_COL].unique())
@@ -80,23 +151,53 @@ class PreproGTMAE:
         return nodes, node2idx
 
     def _standardize(self, df):
+        """
+        Standardize DataFrame columns to zero mean and unit variance.
+
+        Args:
+            df: Input DataFrame
+
+        Returns:
+            Standardized DataFrame
+        """
         mu = df.mean(numeric_only=True)
         sd = df.std(numeric_only=True)
         return (df - mu) / (sd + self.EPS)
 
     def _build_node_features(self, tabu, temp, nodes):
+        """
+        Construct node features from tabular and temporal data.
+
+        Args:
+            tabu: Tabular data
+            temp: Temporal data
+            nodes: List of node identifiers
+
+        Returns:
+            Tuple of (node feature tensor, feature column names)
+        """
         stat_cols = [c for c in tabu.columns if c != self.NODE_ID_COL]
-        Xs = pd.DataFrame({self.NODE_ID_COL: nodes}).merge(
-            tabu[[self.NODE_ID_COL] + stat_cols], on=self.NODE_ID_COL, how="left"
-        ).set_index(self.NODE_ID_COL)
+        Xs = (
+            pd.DataFrame({self.NODE_ID_COL: nodes})
+            .merge(
+                tabu[[self.NODE_ID_COL] + stat_cols], on=self.NODE_ID_COL, how="left"
+            )
+            .set_index(self.NODE_ID_COL)
+        )
         if stat_cols:
             Xs[stat_cols] = Xs[stat_cols].fillna(Xs[stat_cols].mean())
             Xs[stat_cols] = self._standardize(Xs[stat_cols])
 
         Xt = pd.DataFrame(index=Xs.index)
         if not temp.empty:
-            tdf = temp[temp[self.YEAR_COL] <= self.TARGET_YEAR].copy().sort_values([self.NODE_ID_COL, self.YEAR_COL])
-            tcols = [c for c in tdf.columns if c not in (self.NODE_ID_COL, self.YEAR_COL)]
+            tdf = (
+                temp[temp[self.YEAR_COL] <= self.TARGET_YEAR]
+                .copy()
+                .sort_values([self.NODE_ID_COL, self.YEAR_COL])
+            )
+            tcols = [
+                c for c in tdf.columns if c not in (self.NODE_ID_COL, self.YEAR_COL)
+            ]
             if tcols:
                 last_t = (
                     tdf.groupby(self.NODE_ID_COL, as_index=True)
@@ -110,9 +211,25 @@ class PreproGTMAE:
         X = pd.concat([Xs, Xt], axis=1).fillna(0.0).astype(np.float32)
         return torch.tensor(X.values, dtype=torch.float), list(X.columns)
 
-    def _align_and_standardize_edge_attrs(self, df, cont_cols, binary_cols=None, extra_cols_keep=None):
-        if binary_cols is None: binary_cols = []
-        if extra_cols_keep is None: extra_cols_keep = []
+    def _align_and_standardize_edge_attrs(
+        self, df, cont_cols, binary_cols=None, extra_cols_keep=None
+    ):
+        """
+        Align and standardize edge attributes across different edge types.
+
+        Args:
+            df: Edge DataFrame
+            cont_cols: Continuous columns to standardize
+            binary_cols: Binary columns to process
+            extra_cols_keep: Additional columns to preserve
+
+        Returns:
+            Processed DataFrame with standardized edge attributes
+        """
+        if binary_cols is None:
+            binary_cols = []
+        if extra_cols_keep is None:
+            extra_cols_keep = []
 
         for c in cont_cols + binary_cols + extra_cols_keep:
             if c not in df.columns:
@@ -130,6 +247,18 @@ class PreproGTMAE:
         return df[keep_cols]
 
     def _build_pyg_data_mixed_directed(self, tabu, temp, mdir, mndi):
+        """
+        Build PyTorch Geometric Data object with mixed directed/undirected edges.
+
+        Args:
+            tabu: Tabular data
+            temp: Temporal data
+            mdir: Directed edge data
+            mndi: Undirected edge data
+
+        Returns:
+            Tuple of (PyG Data object, nodes, node mapping, feature names, edge attribute names)
+        """
         nodes, node2idx = self._nodes_union(tabu, temp, mdir, mndi)
         x, node_feat_names = self._build_node_features(tabu, temp, nodes)
 
@@ -146,7 +275,9 @@ class PreproGTMAE:
         # no dirigidas -> duplicar
         if not mndi.empty:
             base = mndi[[self.MNDI_U, self.MNDI_V] + self.MNDI_WEIGHT_COLS].copy()
-            rev = base.rename(columns={self.MNDI_U: self.MNDI_V, self.MNDI_V: self.MNDI_U})
+            rev = base.rename(
+                columns={self.MNDI_U: self.MNDI_V, self.MNDI_V: self.MNDI_U}
+            )
             e_und = pd.concat([base, rev], ignore_index=True)
             e_und["u"] = e_und[self.MNDI_U].map(node2idx)
             e_und["v"] = e_und[self.MNDI_V].map(node2idx)
@@ -162,28 +293,62 @@ class PreproGTMAE:
         E = E[E["u"] != E["v"]]
         E = E.drop_duplicates()
 
-        cont_cols   = sorted(set(self.MDIR_WEIGHT_COLS + self.MNDI_WEIGHT_COLS))
-        binary_cols = []             # mueve aquí los 0/1 si tienes
-        extra_cols  = ["edge_type"]  # no estandarizar
+        cont_cols = sorted(set(self.MDIR_WEIGHT_COLS + self.MNDI_WEIGHT_COLS))
+        binary_cols = []  # mueve aquí los 0/1 si tienes
+        extra_cols = ["edge_type"]  # no estandarizar
 
-        E = self._align_and_standardize_edge_attrs(E, cont_cols, binary_cols=binary_cols, extra_cols_keep=extra_cols)
+        E = self._align_and_standardize_edge_attrs(
+            E, cont_cols, binary_cols=binary_cols, extra_cols_keep=extra_cols
+        )
 
         edge_index = torch.tensor(E[["u", "v"]].values.T, dtype=torch.long)
-        edge_attr  = torch.tensor(E[cont_cols + binary_cols + extra_cols].values, dtype=torch.float)
+        edge_attr = torch.tensor(
+            E[cont_cols + binary_cols + extra_cols].values, dtype=torch.float
+        )
 
-        edge_is_undirected = torch.tensor(E["edge_type"].values == 1.0, dtype=torch.bool)
+        edge_is_undirected = torch.tensor(
+            E["edge_type"].values == 1.0, dtype=torch.bool
+        )
 
         data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
         data.num_nodes = x.size(0)
         data.edge_is_undirected = edge_is_undirected
         data.edge_type = torch.tensor(E["edge_type"].values, dtype=torch.float)
         data.edge_continuous_cols = cont_cols
-        return data, nodes, node2idx, node_feat_names, (cont_cols + binary_cols + extra_cols)
+        return (
+            data,
+            nodes,
+            node2idx,
+            node_feat_names,
+            (cont_cols + binary_cols + extra_cols),
+        )
 
-    def run(self, tabu: pd.DataFrame, temp: pd.DataFrame, mdir: pd.DataFrame, mndi: pd.DataFrame):
-        tabu, temp, mdir, mndi = global_prepro(tabu, temp, mdir, mndi, no_mad=self.no_mad, add_idea_emb=self.add_idea_emb)
+    def run(
+        self,
+        tabu: pd.DataFrame,
+        temp: pd.DataFrame,
+        mdir: pd.DataFrame,
+        mndi: pd.DataFrame,
+    ):
+        """
+        Execute the full preprocessing pipeline.
+
+        Args:
+            tabu: Tabular data
+            temp: Temporal data
+            mdir: Directed edge data
+            mndi: Undirected edge data
+
+        Returns:
+            Tuple of (PyG Data object, nodes, node mapping, feature names, edge attribute names)
+        """
+        tabu, temp, mdir, mndi = global_prepro(
+            tabu, temp, mdir, mndi, no_mad=self.no_mad, add_idea_emb=self.add_idea_emb
+        )
         tabu_gae = self._prepro_tabular_data(tabu)
-        data, nodes, node2idx, node_feat_names, edge_attr_names = self._build_pyg_data_mixed_directed(tabu_gae, temp, mdir, mndi)
+        data, nodes, node2idx, node_feat_names, edge_attr_names = (
+            self._build_pyg_data_mixed_directed(tabu_gae, temp, mdir, mndi)
+        )
         return data, nodes, node2idx, node_feat_names, edge_attr_names
 
 
@@ -191,14 +356,28 @@ class PreproGTMAE:
 # |  TRAINING UTILS  |
 # +------------------+
 
-def grouped_undirected_split(edge_index, edge_is_undirected, num_nodes,
-                             val_ratio=0.05, test_ratio=0.10, seed=42):
+
+def grouped_undirected_split(
+    edge_index, edge_is_undirected, num_nodes, val_ratio=0.05, test_ratio=0.10, seed=42
+):
     """
-    Split por grupos:
-    - No dirigidas: (min(u,v), max(u,v)) comparten grupo (evita fuga entre direcciones).
-    - Dirigidas: cada (u,v) es su propio grupo.
-    Devuelve máscaras booleanas sobre aristas.
+    Split edges into train/val/test sets with group-aware splitting.
+
+    Ensures undirected edges (both directions) stay in the same split
+    to prevent data leakage between directions.
+
+    Args:
+        edge_index: Edge index tensor
+        edge_is_undirected: Boolean tensor indicating undirected edges
+        num_nodes: Number of nodes in graph
+        val_ratio: Validation set ratio
+        test_ratio: Test set ratio
+        seed: Random seed
+
+    Returns:
+        Tuple of boolean masks for (train, validation, test) edges
     """
+
     rng = np.random.default_rng(seed)
     u = edge_index[0].cpu().numpy()
     v = edge_index[1].cpu().numpy()
@@ -219,12 +398,12 @@ def grouped_undirected_split(edge_index, edge_is_undirected, num_nodes,
     n_test = int(round(test_ratio * n))
 
     val_g = set(uniq_groups[:n_val])
-    test_g = set(uniq_groups[n_val:n_val + n_test])
-    train_g = set(uniq_groups[n_val + n_test:])
+    test_g = set(uniq_groups[n_val : n_val + n_test])
+    train_g = set(uniq_groups[n_val + n_test :])
 
     train_mask = np.isin(group_id, list(train_g))
-    val_mask   = np.isin(group_id, list(val_g))
-    test_mask  = np.isin(group_id, list(test_g))
+    val_mask = np.isin(group_id, list(val_g))
+    test_mask = np.isin(group_id, list(test_g))
 
     return (
         torch.from_numpy(train_mask.astype(np.bool_)),
@@ -235,11 +414,18 @@ def grouped_undirected_split(edge_index, edge_is_undirected, num_nodes,
 
 def make_supervised_edge_splits(data: Data, train_mask, val_mask, test_mask):
     """
-    Crea (train_data, val_data, test_data) con:
-    - edge_index = SOLO aristas de entrenamiento (para el mensaje).
-    - pos_edge_label_index = aristas del split correspondiente (para el objetivo).
-    - edge_attr se submuestrea correspondiente.
+    Create supervised data splits for edge prediction tasks.
+
+    Args:
+        data: Original PyG Data object
+        train_mask: Train edge mask
+        val_mask: Validation edge mask
+        test_mask: Test edge mask
+
+    Returns:
+        Tuple of (train_data, val_data, test_data) with appropriate edge subsets
     """
+
     def _subset_edge_index(mask):
         ei = data.edge_index[:, mask]
         ea = data.edge_attr[mask]
@@ -258,13 +444,25 @@ def make_supervised_edge_splits(data: Data, train_mask, val_mask, test_mask):
         return d
 
     train_data = _mk(pos_tr, ea_pos_tr)
-    val_data   = _mk(pos_val, ea_pos_val)
-    test_data  = _mk(pos_te, ea_pos_te)
+    val_data = _mk(pos_val, ea_pos_val)
+    test_data = _mk(pos_te, ea_pos_te)
     return train_data, val_data, test_data
 
 
-def pair_features_from_x(x: torch.Tensor, edge_index: torch.Tensor, mode: str = "cosine_l2_absdiff"):
-    ''' Atributos de par densos para cualquier (u,v). '''
+def pair_features_from_x(
+    x: torch.Tensor, edge_index: torch.Tensor, mode: str = "cosine_l2_absdiff"
+):
+    """
+    Compute pair-wise features for node pairs.
+
+    Args:
+        x: Node feature tensor
+        edge_index: Edge index tensor
+        mode: Feature computation mode
+
+    Returns:
+        Tensor of pair-wise features for each edge
+    """
     u, v = edge_index
     xu, xv = x[u], x[v]
 
@@ -282,12 +480,34 @@ def pair_features_from_x(x: torch.Tensor, edge_index: torch.Tensor, mode: str = 
 
 
 class EarlyStopper:
+    """Early stopping utility for model training."""
+
     def __init__(self, patience=30, min_delta=0.0, mode="min", restore_best=True):
-        assert mode in ("min","max")
+        """
+        Initialize early stopper.
+
+        Args:
+            patience: Number of epochs to wait before stopping
+            min_delta: Minimum change to qualify as improvement
+            mode: 'min' for minimizing metrics, 'max' for maximizing
+            restore_best: Whether to restore best model weights
+        """
+        assert mode in ("min", "max")
         self.patience, self.min_delta, self.mode = patience, min_delta, mode
         self.restore_best = restore_best
         self.best_score, self.best_state, self.counter = None, None, 0
+
     def step(self, score, model):
+        """
+        Update early stopping state.
+
+        Args:
+            score: Current validation score
+            model: Model to track
+
+        Returns:
+            Boolean indicating whether to stop training
+        """
         imp = False
         if self.best_score is None:
             imp = True
@@ -299,11 +519,15 @@ class EarlyStopper:
         if imp:
             self.best_score = score
             self.counter = 0
-            if self.restore_best: self.best_state = copy.deepcopy(model.state_dict())
+            if self.restore_best:
+                self.best_state = copy.deepcopy(model.state_dict())
         else:
             self.counter += 1
         return self.counter >= self.patience
+
     def maybe_restore(self, model):
+        """Restore best model weights if configured."""
+
         if self.restore_best and (self.best_state is not None):
             model.load_state_dict(self.best_state)
 
@@ -312,19 +536,59 @@ class EarlyStopper:
 # |  MODEL  |
 # +---------+
 
+
 class EdgeAwareGCNEncoder(nn.Module):
     """
-    Encoder GNN (TransformerConv) que consume edge_attr multivariado.
+    Edge-aware GNN encoder using TransformerConv layers.
+    Consumes multivariate edge attributes for message passing.
     """
-    def __init__(self, in_ch, edge_dim, hid=128, out=64, heads=2, dropout=0.2):
+
+    def __init__(
+        self,
+        in_ch,
+        edge_dim,
+        hid: int = 128,
+        out: int = 64,
+        heads: int = 2,
+        dropout: float = 0.2,
+    ):
+        """
+        Initialize encoder.
+
+        Args:
+            in_ch: Input feature dimension
+            edge_dim: Edge attribute dimension
+            hid: Hidden dimension
+            out: Output dimension
+            heads: Number of attention heads
+            dropout: Dropout rate
+        """
         super().__init__()
-        self.conv1 = TransformerConv(in_ch, hid, heads=heads, edge_dim=edge_dim, dropout=dropout)
-        self.conv2 = TransformerConv(hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout)
+        self.conv1 = TransformerConv(
+            in_ch, hid, heads=heads, edge_dim=edge_dim, dropout=dropout
+        )
+        self.conv2 = TransformerConv(
+            hid * heads, out, heads=1, edge_dim=edge_dim, dropout=dropout
+        )
         self.dropout = dropout
 
     def forward(self, x, edge_index, edge_attr, drop_prob=0.2):
+        """
+        Forward pass.
+
+        Args:
+            x: Node features
+            edge_index: Edge indices
+            edge_attr: Edge attributes
+            drop_prob: Edge dropout probability
+
+        Returns:
+            Node embeddings
+        """
         if drop_prob > 0 and self.training:
-            edge_index, edge_mask = dropout_edge(edge_index, p=drop_prob, training=self.training)
+            edge_index, edge_mask = dropout_edge(
+                edge_index, p=drop_prob, training=self.training
+            )
             if edge_attr is not None:
                 edge_attr = edge_attr[edge_mask]
         x = self.conv1(x, edge_index, edge_attr)
@@ -336,20 +600,41 @@ class EdgeAwareGCNEncoder(nn.Module):
 
 class EdgeRegressor(nn.Module):
     """
-    Decoder para predecir un escalar o vector de atributos de arista (regresión).
-    Puede concatenar "pair features" (cos, l2, |diff|) a [z_u, z_v].
+    Decoder for edge attribute regression.
+    Can incorporate pair-wise features in predictions.
     """
+
     def __init__(self, z_dim, out_dim=1, hid=128, use_pair_feats=True):
+        """
+        Initialize edge regressor.
+
+        Args:
+            z_dim: Input embedding dimension
+            out_dim: Output dimension
+            hid: Hidden dimension
+            use_pair_feats: Whether to use pair-wise features
+        """
         super().__init__()
         self.use_pair_feats = use_pair_feats
-        in_dim = 2*z_dim + (3 if use_pair_feats else 0)  # 3 = pair_features_from_x default
+        in_dim = 2 * z_dim + (
+            3 if use_pair_feats else 0
+        )  # 3 = pair_features_from_x default
         self.mlp = nn.Sequential(
-            nn.Linear(in_dim, hid),
-            nn.ReLU(),
-            nn.Linear(hid, out_dim)
+            nn.Linear(in_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim)
         )
 
     def forward(self, z, edge_index, pair_feats=None):
+        """
+        Forward pass.
+
+        Args:
+            z: Node embeddings
+            edge_index: Edge indices
+            pair_feats: Pair-wise features
+
+        Returns:
+            Predicted edge attributes
+        """
         u, v = edge_index
         parts = [z[u], z[v]]
         if self.use_pair_feats and pair_feats is not None:
@@ -359,46 +644,97 @@ class EdgeRegressor(nn.Module):
 
 
 class NodeRegressor(nn.Module):
-    """
-    Decoder para predecir atributos nodales a partir de z_u.
-    out_dim = nº de columnas en node_target_cols.
-    """
+    """Decoder for node attribute regression."""
+
     def __init__(self, z_dim, out_dim, hid=128):
+        """
+        Initialize node regressor.
+
+        Args:
+            z_dim: Input embedding dimension
+            out_dim: Output dimension
+            hid: Hidden dimension
+        """
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(z_dim, hid), nn.ReLU(),
-            nn.Linear(hid, out_dim)
+            nn.Linear(z_dim, hid), nn.ReLU(), nn.Linear(hid, out_dim)
         )
-    def forward(self, z):
-        return self.mlp(z)  # [N, out_dim]
 
+    def forward(self, z):
+        """
+        Forward pass.
+
+        Args:
+            z: Node embeddings
+
+        Returns:
+            Predicted node attributes
+        """
+        return self.mlp(z)  # [N, out_dim]
 
 
 # +-----------+
 # |  METRICS  |
 # +-----------+
 
+
 def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Root Mean Squared Error.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        RMSE score
+    """
     return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
 
 def _mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Mean Absolute Error.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        MAE score
+    """
     return float(mean_absolute_error(y_true, y_pred))
 
 
 def _spearman(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
-    Spearman rho sin SciPy: correlación de rangos (pandas rank).
-    Si todo es constante, devuelve nan.
+    Calculate Spearman rank correlation coefficient.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        Spearman correlation coefficient
     """
     s_true = pd.Series(y_true).rank(method="average")
     s_pred = pd.Series(y_pred).rank(method="average")
     if s_true.nunique() < 2 or s_pred.nunique() < 2:
-        return float('nan')
-    return float(np.corrcoef(s_true, s_pred)[0,1])
+        return float("nan")
+    return float(np.corrcoef(s_true, s_pred)[0, 1])
 
 
 def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate R² score.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        R² score
+    """
     return r2_score(y_true, y_pred, multioutput="variance_weighted")
 
 
@@ -406,37 +742,95 @@ def _r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 # |  TRAIN  |
 # +---------+
 
+
 def train_edge_node_multitask(
-    data: Data, device,
-    target_cols: list,                 # columnas de arista a predecir (en data.edge_continuous_cols)
-    node_feat_names: list,             # lo devuelve PreproGTMAE.run(...)
-    node_target_cols: list,            # columnas de X a predecir como tarea nodal
-    hid=128, out=64, lr=1e-3, epochs=150,
-    weight_decay=1e-4, dropout=0.2, heads=2, print_every=20,
-    # Early stopping (elige métrica principal):
-    patience=30, min_delta=0.0, monitor="val_edge_rmse", restore_best=True,
-    # Split:
-    val_ratio=0.2, test_ratio=0.2, seed=33,
-    # Decoder y pair features:
-    use_pair_feats=True, pair_mode="cosine_l2_absdiff",
-    # Pérdidas:
-    edge_loss_type="huber", edge_huber_delta=1.0,
-    node_loss_type="huber", node_huber_delta=1.0,
-    # Ranking opcional (edge):
-    add_ranking=False, lambda_rank=0.5, margin=0.1,
-    # Peso de la tarea nodal:
+    data: Data,
+    device,
+    target_cols: list,
+    node_feat_names: list,
+    node_target_cols: list,
+    hid=128,
+    out=64,
+    lr=1e-3,
+    epochs=150,
+    weight_decay=1e-4,
+    dropout=0.2,
+    heads=2,
+    print_every=20,
+    patience=30,
+    min_delta=0.0,
+    monitor="val_edge_rmse",
+    restore_best=True,
+    val_ratio=0.2,
+    test_ratio=0.2,
+    seed=33,
+    use_pair_feats=True,
+    pair_mode="cosine_l2_absdiff",
+    edge_loss_type="huber",
+    edge_huber_delta=1.0,
+    node_loss_type="huber",
+    node_huber_delta=1.0,
+    add_ranking=False,
+    lambda_rank=0.5,
+    margin=0.1,
     lambda_node=1.0,
-    # Dropout de aristas y *enmascarado de targets nodales* (para evitar copiar):
-    edge_drop_prob=0.2, node_mask_rate=0.15,
-    # Debug:
+    edge_drop_prob=0.2,
+    node_mask_rate=0.15,
     dbg_print=True,
 ):
+    """
+    Train a multitask model for edge and node attribute prediction.
+
+    Args:
+        data: PyG Data object with graph structure
+        device: Training device (CPU/GPU)
+        target_cols: Edge target columns to predict
+        node_feat_names: Node feature column names
+        node_target_cols: Node target columns to predict
+        hid: Hidden dimension
+        out: Output dimension
+        lr: Learning rate
+        epochs: Number of training epochs
+        weight_decay: Weight decay for optimizer
+        dropout: Dropout rate
+        heads: Number of attention heads
+        print_every: Print frequency
+        patience: Early stopping patience
+        min_delta: Early stopping minimum delta
+        monitor: Metric to monitor for early stopping
+        restore_best: Whether to restore best model
+        val_ratio: Validation ratio
+        test_ratio: Test ratio
+        seed: Random seed
+        use_pair_feats: Whether to use pair features
+        pair_mode: Pair feature computation mode
+        edge_loss_type: Loss type for edge prediction
+        edge_huber_delta: Delta for Huber loss (edge)
+        node_loss_type: Loss type for node prediction
+        node_huber_delta: Delta for Huber loss (node)
+        add_ranking: Whether to add ranking loss
+        lambda_rank: Weight for ranking loss
+        margin: Margin for ranking loss
+        lambda_node: Weight for node loss
+        edge_drop_prob: Edge dropout probability
+        node_mask_rate: Node feature masking rate
+        dbg_print: Whether to print debug information
+
+    Returns:
+        Tuple of (trained model, node embeddings)
+    """
     # ---------- split de aristas ----------
     train_mask, val_mask, test_mask = grouped_undirected_split(
-        data.edge_index, data.edge_is_undirected, num_nodes=data.num_nodes,
-        val_ratio=val_ratio, test_ratio=test_ratio, seed=seed
+        data.edge_index,
+        data.edge_is_undirected,
+        num_nodes=data.num_nodes,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
     )
-    train_data, val_data, test_data = make_supervised_edge_splits(data, train_mask, val_mask, test_mask)
+    train_data, val_data, test_data = make_supervised_edge_splits(
+        data, train_mask, val_mask, test_mask
+    )
 
     # Mapear objetivos de ARISTA
     all_edge_cols = list(data.edge_continuous_cols) + ["edge_type"]
@@ -447,7 +841,9 @@ def train_edge_node_multitask(
     node_out_dim = len(node_target_idx)
 
     if dbg_print:
-        print(f"[SPLIT] train={train_mask.sum().item()}  val={val_mask.sum().item()}  test={test_mask.sum().item()}")
+        print(
+            f"[SPLIT] train={train_mask.sum().item()}  val={val_mask.sum().item()}  test={test_mask.sum().item()}"
+        )
         print(f"[EDGE TARGETS] {target_cols} -> idx {edge_target_idx}")
         print(f"[NODE TARGETS] {node_target_cols} -> idx {node_target_idx}")
 
@@ -456,10 +852,19 @@ def train_edge_node_multitask(
         def __init__(self):
             super().__init__()
             self.encoder = EdgeAwareGCNEncoder(
-                data.num_features, edge_dim=data.edge_attr.size(1),
-                hid=hid, out=out, dropout=dropout, heads=heads
+                data.num_features,
+                edge_dim=data.edge_attr.size(1),
+                hid=hid,
+                out=out,
+                dropout=dropout,
+                heads=heads,
             )
-            self.edge_dec = EdgeRegressor(z_dim=out, out_dim=len(edge_target_idx), hid=hid, use_pair_feats=use_pair_feats)
+            self.edge_dec = EdgeRegressor(
+                z_dim=out,
+                out_dim=len(edge_target_idx),
+                hid=hid,
+                use_pair_feats=use_pair_feats,
+            )
             self.node_dec = NodeRegressor(z_dim=out, out_dim=node_out_dim, hid=hid)
 
     model = GTMultiModel().to(device)
@@ -467,18 +872,21 @@ def train_edge_node_multitask(
 
     # Pérdidas
     def _make_reg_loss(kind, delta):
-        if kind == "huber": return nn.SmoothL1Loss(beta=delta)
-        if kind == "mse":   return nn.MSELoss()
+        if kind == "huber":
+            return nn.SmoothL1Loss(beta=delta)
+        if kind == "mse":
+            return nn.MSELoss()
         raise ValueError("loss_type debe ser 'huber' o 'mse'.")
+
     edge_loss_fn = _make_reg_loss(edge_loss_type, edge_huber_delta)
     node_loss_fn = _make_reg_loss(node_loss_type, node_huber_delta)
 
     # Tensors base (edge)
     def _to_dev(split):
-        x  = split.x.to(device)                  # [N, F]
-        ei = split.edge_index.to(device)         # [2, Etr]
-        ea = split.edge_attr.to(device)          # [Etr, Fe]
-        pos_ei = split.pos_edge_label_index.to(device)         # [2, Es]
+        x = split.x.to(device)  # [N, F]
+        ei = split.edge_index.to(device)  # [2, Etr]
+        ea = split.edge_attr.to(device)  # [Etr, Fe]
+        pos_ei = split.pos_edge_label_index.to(device)  # [2, Es]
         y_edge = split.pos_edge_attr.to(device)[:, edge_target_idx]  # [Es, Te]
         return x, ei, ea, pos_ei, y_edge
 
@@ -490,15 +898,17 @@ def train_edge_node_multitask(
     def _node_targets(x_tensor):
         # x_tensor: [N, F]; extrae columnas node_target_idx
         return x_tensor[:, node_target_idx]  # [N, Tn]
+
     y_node_tr = _node_targets(x_tr).detach()
     y_node_va = _node_targets(x_va).detach()
     y_node_te = _node_targets(x_te).detach()
 
     # Early stopping
     es = EarlyStopper(
-        patience=patience, min_delta=min_delta,
+        patience=patience,
+        min_delta=min_delta,
         mode=("min" if "rmse" in monitor or "mae" in monitor else "max"),
-        restore_best=restore_best
+        restore_best=restore_best,
     )
 
     # ---- helpers ranking (edge) ----
@@ -507,15 +917,19 @@ def train_edge_node_multitask(
             u = pos_ei[0].cpu().numpy()
             v = pos_ei[1].cpu().numpy()
             y = y_true.detach().cpu().numpy()
-            if y.ndim == 2: y_scalar = y.mean(axis=1)
-            else:           y_scalar = y
+            if y.ndim == 2:
+                y_scalar = y.mean(axis=1)
+            else:
+                y_scalar = y
             df = pd.DataFrame({"u": u, "v": v, "y": y_scalar})
             pos_pairs = []
             for uu, grp in df.groupby("u"):
-                if len(grp) < 2: continue
+                if len(grp) < 2:
+                    continue
                 v_pos = grp.sort_values("y", ascending=False).iloc[0]["v"]
-                v_neg = grp.sort_values("y", ascending=True ).iloc[0]["v"]
-                if v_pos == v_neg: continue
+                v_neg = grp.sort_values("y", ascending=True).iloc[0]["v"]
+                if v_pos == v_neg:
+                    continue
                 pos_pairs.append((int(uu), int(v_pos), int(v_neg)))
             if not pos_pairs:
                 return torch.tensor(0.0, device=z.device)
@@ -532,17 +946,25 @@ def train_edge_node_multitask(
 
     # ---- máscara anti-fuga para targets nodales (opcional) ----
     def _mask_node_inputs(x_tensor, rate):
-        if rate <= 0: return x_tensor
+        if rate <= 0:
+            return x_tensor
         x_masked = x_tensor.clone()
         if len(node_target_idx) > 0:
-            m = torch.bernoulli(torch.full((x_tensor.size(0), len(node_target_idx)), 1.0 - rate, device=x_tensor.device))
+            m = torch.bernoulli(
+                torch.full(
+                    (x_tensor.size(0), len(node_target_idx)),
+                    1.0 - rate,
+                    device=x_tensor.device,
+                )
+            )
             x_masked[:, node_target_idx] = x_masked[:, node_target_idx] * m
         return x_masked
 
     # --------------- TRAIN LOOP ---------------
     print("[TRAIN]")
     for ep in range(1, epochs + 1):
-        model.train(); opt.zero_grad()
+        model.train()
+        opt.zero_grad()
 
         # Enmascara SOLO columnas target nodales en la entrada de TRAIN
         x_tr_in = _mask_node_inputs(x_tr, node_mask_rate)
@@ -551,13 +973,21 @@ def train_edge_node_multitask(
         z = model.encoder(x_tr_in, ei_tr, ea_tr, drop_prob=edge_drop_prob)
 
         # ----- Edge head -----
-        pf_tr = pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode) if use_pair_feats else None
-        y_edge_hat = model.edge_dec(z, pos_ei_tr, pf_tr)      # [Es, Te]
+        pf_tr = (
+            pair_features_from_x(x_tr_in, pos_ei_tr, mode=pair_mode)
+            if use_pair_feats
+            else None
+        )
+        y_edge_hat = model.edge_dec(z, pos_ei_tr, pf_tr)  # [Es, Te]
         edge_reg_loss = edge_loss_fn(y_edge_hat, y_edge_tr)
 
         # ----- Node head -----
-        y_node_hat = model.node_dec(z)                        # [N, Tn]
-        node_reg_loss = node_loss_fn(y_node_hat, y_node_tr) if node_out_dim > 0 else torch.tensor(0.0, device=z.device)
+        y_node_hat = model.node_dec(z)  # [N, Tn]
+        node_reg_loss = (
+            node_loss_fn(y_node_hat, y_node_tr)
+            if node_out_dim > 0
+            else torch.tensor(0.0, device=z.device)
+        )
 
         # ----- Ranking opcional (edge) -----
         if add_ranking:
@@ -565,7 +995,11 @@ def train_edge_node_multitask(
         else:
             rank_loss = torch.tensor(0.0, device=z.device)
 
-        loss = edge_reg_loss + lambda_node * node_reg_loss + (lambda_rank * rank_loss if add_ranking else 0.0)
+        loss = (
+            edge_reg_loss
+            + lambda_node * node_reg_loss
+            + (lambda_rank * rank_loss if add_ranking else 0.0)
+        )
         loss.backward()
         opt.step()
 
@@ -575,7 +1009,11 @@ def train_edge_node_multitask(
             z_va = model.encoder(x_va, ei_va, ea_va, drop_prob=0.0)
 
             # Edge val
-            pf_va = pair_features_from_x(x_va, pos_ei_va, mode=pair_mode) if use_pair_feats else None
+            pf_va = (
+                pair_features_from_x(x_va, pos_ei_va, mode=pair_mode)
+                if use_pair_feats
+                else None
+            )
             y_edge_hat_va = model.edge_dec(z_va, pos_ei_va, pf_va)
             # Node val (sin máscara)
             y_node_hat_va = model.node_dec(z_va) if node_out_dim > 0 else None
@@ -597,26 +1035,40 @@ def train_edge_node_multitask(
                 node_val_spr = _spearman(y_node_va_np.ravel(), y_node_hat_va_np.ravel())
                 node_val_r2 = _r2(y_node_va_np, y_node_hat_va_np)
             else:
-                node_val_rmse = node_val_mae = node_val_spr, node_val_r2 = float('nan')
+                node_val_rmse = node_val_mae = node_val_spr, node_val_r2 = float("nan")
 
         if (ep % print_every == 0) or (ep == 1):
-            log = (f" [{ep:03d}] total={loss.item():.4f} | edge={edge_reg_loss.item():.4f} "
-                   f"| node={node_reg_loss.item():.4f} | rank={rank_loss.item():.4f} || "
-                   f"VAL edge(RMSE={edge_val_rmse:.4f}, MAE={edge_val_mae:.4f}, Sp={edge_val_spr:.4f}, R2={edge_val_r2:.4f})"
-                   f"| node(RMSE={node_val_rmse:.4f}, MAE={node_val_mae:.4f}, Sp={node_val_spr:.4f}, R2={node_val_r2:.4f})")
+            log = (
+                f" [{ep:03d}] total={loss.item():.4f} | edge={edge_reg_loss.item():.4f} "
+                f"| node={node_reg_loss.item():.4f} | rank={rank_loss.item():.4f} || "
+                f"VAL edge(RMSE={edge_val_rmse:.4f}, MAE={edge_val_mae:.4f}, Sp={edge_val_spr:.4f}, R2={edge_val_r2:.4f})"
+                f"| node(RMSE={node_val_rmse:.4f}, MAE={node_val_mae:.4f}, Sp={node_val_spr:.4f}, R2={node_val_r2:.4f})"
+            )
             print(log)
 
         # ---- early stopping según 'monitor' ----
-        if monitor == "val_edge_rmse": score, es.mode = edge_val_rmse, "min"
-        elif monitor == "val_edge_mae": score, es.mode = edge_val_mae, "min"
-        elif monitor == "val_edge_spr": score, es.mode = (edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9), "max"
-        elif monitor == "val_node_rmse": score, es.mode = node_val_rmse, "min"
-        elif monitor == "val_node_mae": score, es.mode = node_val_mae, "min"
-        else: score, es.mode = (node_val_spr if not (node_val_spr != node_val_spr) else -1e9), "max"
+        if monitor == "val_edge_rmse":
+            score, es.mode = edge_val_rmse, "min"
+        elif monitor == "val_edge_mae":
+            score, es.mode = edge_val_mae, "min"
+        elif monitor == "val_edge_spr":
+            score, es.mode = (
+                edge_val_spr if not (edge_val_spr != edge_val_spr) else -1e9
+            ), "max"
+        elif monitor == "val_node_rmse":
+            score, es.mode = node_val_rmse, "min"
+        elif monitor == "val_node_mae":
+            score, es.mode = node_val_mae, "min"
+        else:
+            score, es.mode = (
+                node_val_spr if not (node_val_spr != node_val_spr) else -1e9
+            ), "max"
 
         if es.step(score, model):
             if print_every:
-                print(f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f}).")
+                print(
+                    f"Early stopping en epoch {ep} (mejor {monitor}={es.best_score:.4f})."
+                )
             break
 
     es.maybe_restore(model)
@@ -624,31 +1076,59 @@ def train_edge_node_multitask(
     # ---- Embeddings finales en el grafo COMPLETO ----
     model.eval()
     with torch.no_grad():
-        Z = model.encoder(data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)).cpu()
+        Z = model.encoder(
+            data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)
+        ).cpu()
 
     # ---- TEST ----
     with torch.no_grad():
         # EDGE
         z_te = model.encoder(x_te, ei_te, ea_te, drop_prob=0.0)
-        pf_te = pair_features_from_x(x_te, pos_ei_te, mode=pair_mode) if use_pair_feats else None
+        pf_te = (
+            pair_features_from_x(x_te, pos_ei_te, mode=pair_mode)
+            if use_pair_feats
+            else None
+        )
         y_edge_hat_te = model.edge_dec(z_te, pos_ei_te, pf_te)
-        edge_test_rmse = _rmse(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
-        edge_test_mae = _mae (y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
-        edge_test_spr = _spearman(y_edge_te.detach().cpu().numpy().ravel(), y_edge_hat_te.detach().cpu().numpy().ravel())
-        edge_test_r2 = _r2(y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy())
+        edge_test_rmse = _rmse(
+            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
+        )
+        edge_test_mae = _mae(
+            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
+        )
+        edge_test_spr = _spearman(
+            y_edge_te.detach().cpu().numpy().ravel(),
+            y_edge_hat_te.detach().cpu().numpy().ravel(),
+        )
+        edge_test_r2 = _r2(
+            y_edge_te.detach().cpu().numpy(), y_edge_hat_te.detach().cpu().numpy()
+        )
         # NODE
         y_node_hat_te = model.node_dec(z_te) if node_out_dim > 0 else None
         if node_out_dim > 0:
-            node_test_rmse = _rmse(y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy())
-            node_test_mae = _mae (y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy())
-            node_test_spr = _spearman(y_node_te.detach().cpu().numpy().ravel(), y_node_hat_te.detach().cpu().numpy().ravel())
-            node_test_sr2 = _r2(y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy())
+            node_test_rmse = _rmse(
+                y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy()
+            )
+            node_test_mae = _mae(
+                y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy()
+            )
+            node_test_spr = _spearman(
+                y_node_te.detach().cpu().numpy().ravel(),
+                y_node_hat_te.detach().cpu().numpy().ravel(),
+            )
+            node_test_sr2 = _r2(
+                y_node_te.detach().cpu().numpy(), y_node_hat_te.detach().cpu().numpy()
+            )
         else:
-            node_test_rmse = node_test_mae = node_test_spr, node_test_sr2 = float('nan')
+            node_test_rmse = node_test_mae = node_test_spr, node_test_sr2 = float("nan")
 
     if print_every:
         print("[TEST]")
-        print(f" [EDGE] RMSE={edge_test_rmse:.6f} | MAE={edge_test_mae:.6f} | Sp={edge_test_spr:.6f} | Sp={edge_test_r2:.6f}")
-        print(f" [NODE] RMSE={node_test_rmse:.6f} | MAE={node_test_mae:.6f} | Sp={node_test_spr:.6f} | Sp={node_test_sr2:.6f}")
+        print(
+            f" [EDGE] RMSE={edge_test_rmse:.6f} | MAE={edge_test_mae:.6f} | Sp={edge_test_spr:.6f} | Sp={edge_test_r2:.6f}"
+        )
+        print(
+            f" [NODE] RMSE={node_test_rmse:.6f} | MAE={node_test_mae:.6f} | Sp={node_test_spr:.6f} | Sp={node_test_sr2:.6f}"
+        )
 
     return model, Z
