@@ -11,14 +11,43 @@ from ...models.TGT import PreproTGT, TGTConfig, compute_tgt_embeddings
 
 
 def _grid_keys_order(grid: dict):
+    """
+    Get ordered list of grid parameter keys.
+    
+    Args:
+        grid: Parameter grid dictionary
+        
+    Returns:
+        List of parameter keys in consistent order
+    """
     return list(grid.keys())
 
 
 def _params_key(params: dict, keys_order: list):
+    """
+    Create unique key for parameter combination.
+    
+    Args:
+        params: Parameter dictionary
+        keys_order: Ordered list of parameter keys
+        
+    Returns:
+        Tuple representing unique parameter combination
+    """
     return tuple(params[k] for k in keys_order)
 
 
 def _load_completed_param_keys(csv_path: str, keys_order: list):
+    """
+    Load already completed parameter combinations from CSV.
+    
+    Args:
+        csv_path: Path to results CSV file
+        keys_order: Ordered list of parameter keys
+        
+    Returns:
+        Set of completed parameter combinations
+    """
     if not (csv_path and os.path.exists(csv_path)):
         return set()
     df = pd.read_csv(
@@ -32,6 +61,13 @@ def _load_completed_param_keys(csv_path: str, keys_order: list):
 
 
 def _append_row_to_csv(row_dict: dict, csv_path: str):
+    """
+    Append a row of results to CSV file.
+    
+    Args:
+        row_dict: Dictionary of results to append
+        csv_path: Path to CSV file
+    """
     df_row = pd.DataFrame([row_dict])
     header = not os.path.exists(csv_path)
     df_row.to_csv(csv_path, index=False, mode="a", header=header)
@@ -45,6 +81,20 @@ def _extract_targets_from_temp(
     cc_col: str = "cc",
     year_col: str = "year",
 ):
+    """
+    Extract target variables from temporal data for specific year.
+    
+    Args:
+        temp_df: Temporal data DataFrame
+        node_index: Node ID to index mapping
+        target_year: Target year for extraction
+        target_cols: Specific target columns to extract
+        cc_col: Node identifier column name
+        year_col: Year column name
+        
+    Returns:
+        Dictionary of target arrays indexed by column name
+    """
     df = temp_df.copy()
     df[cc_col] = df[cc_col].astype(str)
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -80,6 +130,17 @@ def _extract_targets_from_temp(
 
 
 def _ridge_closed_form(X: np.ndarray, y: np.ndarray, alpha: float = 1.0):
+    """
+    Compute ridge regression solution in closed form.
+    
+    Args:
+        X: Feature matrix
+        y: Target vector
+        alpha: Regularization strength
+        
+    Returns:
+        Tuple of (weights, RMSE)
+    """
     ones = np.ones((X.shape[0], 1), dtype=X.dtype)
     Xb = np.hstack([X, ones])
     d = Xb.shape[1]
@@ -99,6 +160,20 @@ def _kfold_rmse(
     k: int = 5,
     seed: int = 42,
 ) -> float:
+    """
+    Compute k-fold cross-validated RMSE using ridge regression.
+    
+    Args:
+        Z: Embedding matrix
+        idx: Node indices for target values
+        y: Target values
+        alpha: Ridge regularization parameter
+        k: Number of folds
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Mean RMSE across k folds
+    """
     n = len(idx)
     k = min(k, n) if n > 1 else 1
     rng = np.random.RandomState(seed)
@@ -124,6 +199,12 @@ def _kfold_rmse(
 
 
 def default_tgt_param_grid():
+    """
+    Define default hyperparameter grid for Temporal Graph Transformer.
+    
+    Returns:
+        Dictionary of parameter ranges for grid search
+    """
     return {
         "hidden": [64, 96],
         "heads": [2, 4],
@@ -136,6 +217,15 @@ def default_tgt_param_grid():
 
 
 def _expand_grid(grid: dict):
+    """
+    Generate all combinations of grid parameters.
+    
+    Args:
+        grid: Parameter grid dictionary
+        
+    Returns:
+        List of all parameter combinations
+    """
     keys = list(grid.keys())
     combos = list(itertools.product(*[grid[k] for k in keys]))
     out = []
@@ -163,11 +253,31 @@ def run_tgt_gridsearch(
     save_weights_json: bool = False,
 ):
     """
-    Igual que antes pero:
-      - No acumula resultados en RAM.
-      - Reanuda solo con las claves de hiperparámetros ya 'ok'.
-      - Limpia memoria tras cada iteración.
-    Devuelve un DataFrame *ligero* leído del CSV ya ordenado (si existe).
+    Run comprehensive grid search for Temporal Graph Transformer hyperparameters.
+    
+    Performs memory-efficient grid search with resume capability, evaluating
+    each parameter combination using k-fold cross-validation with ridge regression.
+    
+    Args:
+        tabu: Tabular data DataFrame
+        temp: Temporal data DataFrame
+        mdir: Directed edge data DataFrame
+        mndi: Undirected edge data DataFrame
+        add_idea_emb: Whether to add idea embeddings
+        no_mad: Whether to exclude Madrid from data
+        target_year: Target year for prediction
+        target_cols: Specific target columns to evaluate
+        param_grid: Custom parameter grid (uses default if None)
+        alpha_ridge: Ridge regularization parameter
+        k_folds: Number of cross-validation folds
+        device: Computation device (CPU/GPU)
+        verbose: Whether to print progress
+        csv_path: Path to save results CSV
+        resume: Whether to resume from existing results
+        save_weights_json: Whether to save temporal weights (memory intensive)
+        
+    Returns:
+        DataFrame with grid search results sorted by average RMSE
     """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

@@ -18,6 +18,20 @@ from .utils import global_prepro
 
 @dataclass
 class Preprocessed:
+    """
+    Container for preprocessed graph and temporal data.
+    
+    Attributes:
+        node_index: Mapping from node identifiers to indices
+        X_static: Static node features tensor
+        X_temp: Temporal node features tensor
+        M_temp: Missing value mask for temporal features
+        years: List of years in temporal data
+        edge_index_dir: Directed edge indices
+        edge_attr_dir: Directed edge attributes
+        edge_index_und: Undirected edge indices
+        edge_attr_und: Undirected edge attributes
+    """
     node_index: Dict[str, int]
     X_static: torch.Tensor
     X_temp: torch.Tensor
@@ -30,18 +44,41 @@ class Preprocessed:
 
 
 class PreproTGT:
+    """
+    Preprocessor for Temporal Graph Transformer (TGT) model.
+    
+    Handles data preprocessing, feature engineering, and graph construction
+    from tabular, temporal, and edge data for TGT model training.
+    """
 
     def __init__(
         self,
         add_idea_emb: bool = True,
         no_mad: bool = False,
     ):
+        """
+        Initialize TGT preprocessor.
+        
+        Args:
+            add_idea_emb: Whether to add idea embeddings
+            no_mad: Whether to exclude Madrid from data
+        """
         self.add_idea_emb = add_idea_emb
         self.no_mad = no_mad
 
         self.EPS = 1e-8
 
     def _prepro_tabular_data(self, tabu: pd.DataFrame, temp: pd.DataFrame):
+        """
+        Preprocess tabular and temporal data for TGT model.
+        
+        Args:
+            tabu: Tabular data DataFrame
+            temp: Temporal data DataFrame
+            
+        Returns:
+            Tuple of processed (tabular, temporal) DataFrames
+        """
         temp_cols = set(
             ["cc", "year", "geo_dens_poblacion", "y_edad_media", "p_feminidad"]
             + [
@@ -72,6 +109,16 @@ class PreproTGT:
     def _find_cols(
         self, df: pd.DataFrame, preferred: Tuple[str, str]
     ) -> Tuple[str, str]:
+        """
+        Find source and target columns in edge DataFrame.
+        
+        Args:
+            df: Edge DataFrame
+            preferred: Preferred column names to try first
+            
+        Returns:
+            Tuple of (source_column, target_column)
+        """
         candidates = [
             preferred,
             ("src", "dst"),
@@ -90,6 +137,16 @@ class PreproTGT:
     def _build_node_index(
         self, tabu: pd.DataFrame, cc_col: str = "cc"
     ) -> Dict[str, int]:
+        """
+        Build mapping from node identifiers to indices.
+        
+        Args:
+            tabu: Tabular data DataFrame
+            cc_col: Node identifier column name
+            
+        Returns:
+            Dictionary mapping node IDs to indices
+        """
         if cc_col not in tabu.columns and tabu.index.name == cc_col:
             cc_values = tabu.index.astype(str).tolist()
         else:
@@ -100,6 +157,17 @@ class PreproTGT:
     def _extract_static_features(
         self, tabu: pd.DataFrame, node_index: Dict[str, int], cc_col: str = "cc"
     ) -> torch.Tensor:
+        """
+        Extract static node features from tabular data.
+        
+        Args:
+            tabu: Tabular data DataFrame
+            node_index: Node ID to index mapping
+            cc_col: Node identifier column name
+            
+        Returns:
+            Tensor of static node features
+        """
         if cc_col in tabu.columns:
             df = tabu.copy()
         else:
@@ -129,6 +197,20 @@ class PreproTGT:
         add_missing_mask: bool = True,
         impute: Optional[str] = "ffill",
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], List[int], List[str]]:
+        """
+        Extract temporal node features as 3D tensor.
+        
+        Args:
+            temp: Temporal data DataFrame
+            node_index: Node ID to index mapping
+            cc_col: Node identifier column name
+            year_col: Year column name
+            add_missing_mask: Whether to create missing value mask
+            impute: Imputation strategy ('ffill', 'bfill', or None)
+            
+        Returns:
+            Tuple of (temporal features, missing mask, years, feature names)
+        """
         df = temp.copy()
         df[cc_col] = df[cc_col].astype(str)
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -175,7 +257,17 @@ class PreproTGT:
         feat_cols: List[str],
         binary_cols: Optional[List[str]] = None,
     ) -> pd.DataFrame:
-        """Estandarización por relación (deja opcionalmente binarios sin tocar)"""
+        """
+        Standardize edge features while preserving binary columns.
+        
+        Args:
+            df: Edge DataFrame
+            feat_cols: Feature columns to standardize
+            binary_cols: Binary columns to preserve
+            
+        Returns:
+            DataFrame with standardized features
+        """
         if not feat_cols:
             return df
         binary_cols = binary_cols or []
@@ -198,9 +290,18 @@ class PreproTGT:
         binary_cols_und: Optional[List[str]] = None,
     ):
         """
-        Construye edge_index/edge_attr para dirigidas (tal cual) y no dirigidas (duplicadas).
-        Aplica estandarización de atributos por relación (dirigida y no dirigida) de forma independiente.
-        Elimina lazos u==v y duplicados exactos.
+        Build directed and undirected edge tensors.
+        
+        Args:
+            mdir: Directed edge DataFrame
+            mndi: Undirected edge DataFrame
+            node_index: Node ID to index mapping
+            prefer_cols: Preferred column names
+            binary_cols_dir: Binary columns for directed edges
+            binary_cols_und: Binary columns for undirected edges
+            
+        Returns:
+            Tuple of (directed edges, directed attributes, undirected edges, undirected attributes)
         """
         # --- Directed ---
         edge_index_dir = torch.empty((2, 0), dtype=torch.long)
@@ -319,6 +420,22 @@ class PreproTGT:
         binary_cols_dir: Optional[List[str]] = None,
         binary_cols_und: Optional[List[str]] = None,
     ) -> Preprocessed:
+        """
+        Execute the full preprocessing pipeline.
+        
+        Args:
+            tabu: Tabular data
+            temp: Temporal data
+            mdir: Directed edge data
+            mndi: Undirected edge data
+            cc_col: Node identifier column
+            year_col: Year column
+            binary_cols_dir: Binary columns for directed edges
+            binary_cols_und: Binary columns for undirected edges
+            
+        Returns:
+            Preprocessed data container
+        """
 
         tabu, temp, mdir, mndi = global_prepro(
             tabu, temp, mdir, mndi, no_mad=self.no_mad, add_idea_emb=self.add_idea_emb
@@ -355,6 +472,17 @@ class PreproTGT:
 def sinusoidal_time_encoding(
     years: List[int], ref_year: int = 2022, d_model: int = 32
 ) -> torch.Tensor:
+    """
+    Generate sinusoidal positional encodings for temporal data.
+    
+    Args:
+        years: List of years
+        ref_year: Reference year for relative encoding
+        d_model: Encoding dimension
+        
+    Returns:
+        Sinusoidal positional encodings
+    """
     rel = torch.tensor([y - ref_year for y in years], dtype=torch.float32).unsqueeze(
         1
     )  # [T,1]
@@ -369,6 +497,17 @@ def sinusoidal_time_encoding(
 def exponential_weights(
     years: List[int], target_year: int = 2022, decay: float = 0.35
 ) -> torch.Tensor:
+    """
+    Compute exponential decay weights for temporal aggregation.
+    
+    Args:
+        years: List of years
+        target_year: Target year for weighting
+        decay: Decay rate
+        
+    Returns:
+        Weight tensor for temporal aggregation
+    """
     gaps = torch.tensor([max(0, target_year - y) for y in years], dtype=torch.float32)
     w = torch.exp(-decay * gaps)
     w = w / (w.sum() + 1e-8)
@@ -377,6 +516,19 @@ def exponential_weights(
 
 @dataclass
 class TGTConfig:
+    """
+    Configuration for Temporal Graph Transformer model.
+    
+    Attributes:
+        hidden: Hidden dimension
+        heads: Number of attention heads
+        edge_drop: Edge dropout rate
+        dropout: General dropout rate
+        time_enc_dim: Time encoding dimension
+        tf_layers: Number of transformer layers
+        tf_ff: Transformer feedforward dimension
+        tf_heads: Transformer attention heads
+    """
     hidden: int = 128
     heads: int = 4
     edge_drop: float = 0.0
@@ -389,7 +541,10 @@ class TGTConfig:
 
 class HeteroSpatialEncoder(nn.Module):
     """
-    Two relation-specific TransformerConv blocks (directed / undirected) fused by summation + linear.
+    Heterogeneous spatial encoder with relation-specific convolutions.
+    
+    Uses separate TransformerConv blocks for directed and undirected edges,
+    then fuses them through concatenation and linear transformation.
     """
 
     def __init__(
@@ -401,6 +556,17 @@ class HeteroSpatialEncoder(nn.Module):
         heads: int = 4,
         dropout: float = 0.1,
     ):
+        """
+        Initialize heterogeneous spatial encoder.
+        
+        Args:
+            in_dim: Input feature dimension
+            e_dir_dim: Directed edge attribute dimension
+            e_und_dim: Undirected edge attribute dimension
+            hidden: Hidden dimension
+            heads: Number of attention heads
+            dropout: Dropout rate
+        """
         super().__init__()
         self.conv_dir = TransformerConv(
             in_dim,
@@ -430,6 +596,19 @@ class HeteroSpatialEncoder(nn.Module):
         edge_index_und: torch.Tensor,
         edge_attr_und: Optional[torch.Tensor],
     ) -> torch.Tensor:
+        """
+        Forward pass with heterogeneous edge processing.
+        
+        Args:
+            x: Node features
+            edge_index_dir: Directed edge indices
+            edge_attr_dir: Directed edge attributes
+            edge_index_und: Undirected edge indices
+            edge_attr_und: Undirected edge attributes
+            
+        Returns:
+            Spatially encoded node representations
+        """
         h_dir = self.conv_dir(x, edge_index_dir, edge_attr_dir)  # [N, hidden*heads]
         h_und = self.conv_und(x, edge_index_und, edge_attr_und)  # [N, hidden*heads]
         h = torch.cat([h_dir, h_und], dim=-1)
@@ -438,11 +617,10 @@ class HeteroSpatialEncoder(nn.Module):
 
 class TemporalGraphTransformer(nn.Module):
     """
-    - Input per year: x_t = concat[x_static, x_temp_t, mask_t]
-    - Spatial: HeteroSpatialEncoder -> h_t
-    - Add temporal encoding for the year
-    - Temporal: TransformerEncoder over sequence (T steps)
-    - Weighted aggregation toward target year -> z
+    Temporal Graph Transformer for spatio-temporal graph data.
+    
+    Combines spatial graph processing with temporal transformer
+    for joint spatio-temporal representation learning.
     """
 
     def __init__(
@@ -453,6 +631,16 @@ class TemporalGraphTransformer(nn.Module):
         e_und_dim: int,
         cfg: TGTConfig = TGTConfig(),
     ):
+        """
+        Initialize Temporal Graph Transformer.
+        
+        Args:
+            x_static_dim: Static feature dimension
+            x_temp_dim: Temporal feature dimension
+            e_dir_dim: Directed edge attribute dimension
+            e_und_dim: Undirected edge attribute dimension
+            cfg: Model configuration
+        """
         super().__init__()
         self.cfg = cfg
         in_dim = (
@@ -492,6 +680,24 @@ class TemporalGraphTransformer(nn.Module):
         target_year: int = 2022,
         decay: float = 0.35,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass with spatio-temporal processing.
+        
+        Args:
+            X_static: Static node features
+            X_temp: Temporal node features
+            M_temp: Missing value mask
+            years: List of years
+            edge_index_dir: Directed edge indices
+            edge_attr_dir: Directed edge attributes
+            edge_index_und: Undirected edge indices
+            edge_attr_und: Undirected edge attributes
+            target_year: Target year for weighting
+            decay: Decay rate for temporal weighting
+            
+        Returns:
+            Tuple of (node embeddings, temporal weights)
+        """
         device = X_static.device
         T, N, D_temp = X_temp.shape
         if M_temp is None:
@@ -539,6 +745,19 @@ def compute_tgt_embeddings(
     cfg: TGTConfig = TGTConfig(),
     decay: float = 0.35,
 ) -> Tuple[torch.Tensor, List[int], torch.Tensor]:
+    """
+    Compute Temporal Graph Transformer embeddings for preprocessed data.
+    
+    Args:
+        prep: Preprocessed data container
+        target_year: Target year for temporal weighting
+        device: Computation device
+        cfg: Model configuration
+        decay: Decay rate for temporal weighting
+        
+    Returns:
+        Tuple of (embeddings, years, weights)
+    """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     D_s = prep.X_static.size(1)
     D_temp = prep.X_temp.size(2)
