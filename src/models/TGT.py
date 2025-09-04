@@ -662,35 +662,35 @@ class TemporalGraphTransformer(nn.Module):
         if M_temp is None:
             M_temp = torch.zeros_like(X_temp)
 
-        # Build per-year spatial encodings
-        H_list = []
+        H = torch.empty((T, N, self.cfg.hidden), device=device, dtype=X_static.dtype)
         for t in range(T):
-            xt = torch.cat([X_static, X_temp[t], M_temp[t]], dim=-1)  # [N, D_s + 2*D_temp]
+            xt = torch.cat([X_static, X_temp[t], M_temp[t]], dim=-1)   # [N, D_s + 2*D_temp]
             xt = self.input_proj(xt)  # [N, hidden]
-            ht = self.spatial(
-                xt, edge_index_dir, edge_attr_dir, edge_index_und, edge_attr_und
-            )  # [N, hidden]
-            H_list.append(ht)
-        H = torch.stack(H_list, dim=0)  # [T, N, hidden]
+            ht = self.spatial(xt, edge_index_dir, edge_attr_dir, edge_index_und, edge_attr_und)  # [N, hidden]
+            H[t] = ht  # in-place
 
         # Temporal encoding
-        pe = sinusoidal_time_encoding(
-            years, ref_year=target_year, d_model=self.cfg.time_enc_dim
-        ).to(
-            device
-        )  # [T, d_t]
-        pe_h = self.time_proj(pe).unsqueeze(1).repeat(1, N, 1)  # [T, N, hidden]
-        H = H + pe_h
+        pe = sinusoidal_time_encoding(years, ref_year=target_year, d_model=self.cfg.time_enc_dim
+                                      ).to(device=device, dtype=H.dtype)  # [T, d_t]
+        pe_h = self.time_proj(pe).unsqueeze(1)  # [T, 1, hidden]
+        H = H + pe_h  # broadcast -> [T, N, hidden]
 
-        # Transformer over time (batch is nodes): rearrange to [N, T, hidden]
-        H_bt = H.permute(1, 0, 2)  # [N, T, hidden]
-        H_out = self.temporal_tf(H_bt)  # [N, T, hidden]
+        # Reordenar a [N, T, hidden]
+        H_bt = H.permute(1, 0, 2).contiguous()          # [N, T, hidden]
+        w = exponential_weights(years, target_year=target_year, decay=decay
+                                ).to(device=device, dtype=H_bt.dtype)  # [T]
 
-        # Weighted aggregation to target year
-        w = exponential_weights(years, target_year=target_year, decay=decay).to(device)  # [T]
-        z = (H_out * w.view(1, -1, 1)).sum(dim=1)  # [N, hidden]
-        z = self.readout(z)
-        return z, w  # [N, hidden], [T]
+        bs = 1024  # adjust over RAM (p.ej., 256/512/1024)
+        z = torch.empty((N, self.cfg.hidden), device=device, dtype=H_bt.dtype)
+
+        for s in range(0, N, bs):
+            e = min(s + bs, N)
+            H_chunk = H_bt[s:e]  # [bs, T, hidden]
+            H_out = self.temporal_tf(H_chunk)  # [bs, T, hidden]
+            z[s:e] = (H_out * w.view(1, -1, 1)).sum(dim=1)  # [bs, hidden]
+
+        z = self.readout(z)  # [N, hidden]
+        return z, w
 
 
 def compute_tgt_embeddings(
@@ -714,30 +714,50 @@ def compute_tgt_embeddings(
         Tuple of (embeddings, years, weights)
     """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     D_s = prep.X_static.size(1)
     D_temp = prep.X_temp.size(2)
     e_dir_dim = 0 if prep.edge_attr_dir is None else prep.edge_attr_dir.size(1)
     e_und_dim = 0 if prep.edge_attr_und is None else prep.edge_attr_und.size(1)
 
     model = TemporalGraphTransformer(D_s, D_temp, e_dir_dim, e_und_dim, cfg=cfg).to(device)
-    Xs = prep.X_static.to(device)
-    Xt = prep.X_temp.to(device)
-    Mt = prep.M_temp.to(device) if prep.M_temp is not None else None
-    eidir = prep.edge_index_dir.to(device)
-    eeadir = prep.edge_attr_dir.to(device) if prep.edge_attr_dir is not None else None
-    eiund = prep.edge_index_und.to(device)
-    eeaund = prep.edge_attr_und.to(device) if prep.edge_attr_und is not None else None
+    model.eval()
 
-    Z, w = model(
-        Xs,
-        Xt,
-        Mt,
-        prep.years,
-        eidir,
-        eeadir,
-        eiund,
-        eeaund,
-        target_year=target_year,
-        decay=decay,
-    )
-    return Z.detach().cpu(), prep.years, w.detach().cpu()
+    Xs = prep.X_static.to(device, non_blocking=True)
+    Xt = prep.X_temp.to(device, non_blocking=True)
+    Mt = prep.M_temp.to(device, non_blocking=True) if prep.M_temp is not None else None
+    eidir = prep.edge_index_dir.to(device, non_blocking=True)
+    eeadir = prep.edge_attr_dir.to(device, non_blocking=True) if prep.edge_attr_dir is not None else None
+    eiund = prep.edge_index_und.to(device, non_blocking=True)
+    eeaund = prep.edge_attr_und.to(device, non_blocking=True) if prep.edge_attr_und is not None else None
+
+    use_cuda = (device.type == "cuda")
+    amp_ctx = (torch.cuda.amp.autocast(dtype=torch.bfloat16) if use_cuda else torch.autocast("cpu", dtype=torch.bfloat16))
+
+    with torch.inference_mode():
+        if use_cuda:
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                Z, w = model(Xs, Xt, Mt, prep.years, eidir, eeadir, eiund, eeaund,
+                             target_year=target_year, decay=decay)
+        else:
+            Z, w = model(Xs, Xt, Mt, prep.years, eidir, eeadir, eiund, eeaund,
+                         target_year=target_year, decay=decay)
+
+    Z_cpu = Z.detach().cpu()
+    w_cpu = w.detach().cpu()
+
+    if Z_cpu.dtype in (torch.bfloat16, torch.float16, torch.uint8, torch.int8):
+        Z_np = Z_cpu.to(torch.float32).numpy()
+    else:
+        Z_np = Z_cpu.numpy()
+
+    N, D = Z_cpu.shape
+    inv = [""] * N
+    for cc, idx in prep.node_index.items():
+        if 0 <= idx < N:
+            inv[idx] = str(cc)
+    col_names = [f"emb_{j}" for j in range(D)]
+    df_emb = pd.DataFrame(Z_np, columns=col_names)
+    df_emb.insert(0, "cc", inv)
+
+    return Z_cpu, prep.years, w_cpu, df_emb

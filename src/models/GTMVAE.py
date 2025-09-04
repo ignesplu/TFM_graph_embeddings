@@ -506,6 +506,12 @@ def train_edge_node_multitask_v(
         )
         Z = mu_full.cpu()
 
+    # Embedding DataFrame
+    node_ids = getattr(data, "node_ids", list(range(data.num_nodes)))
+    emb_cols = [f"z_{i}" for i in range(Z.shape[1])]
+    embeddings_df = pd.DataFrame(Z.numpy(), index=node_ids, columns=emb_cols)
+    embeddings_df.index.name = getattr(data, "node_id_col", "node_id")
+
     # TEST
     with torch.no_grad():
         mu_te, _ = model.encoder(x_te, ei_te, ea_te, drop_prob=0.0)
@@ -549,4 +555,4 @@ def train_edge_node_multitask_v(
             f" [NODE] RMSE={node_test_rmse:.6f} | MAE={node_test_mae:.6f} | Sp={node_test_spr:.6f} | R2={node_test_sr2:.6f}"
         )
 
-    return model, Z
+    return model, Z, embeddings_df

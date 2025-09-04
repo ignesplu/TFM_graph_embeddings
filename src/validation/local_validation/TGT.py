@@ -313,7 +313,7 @@ def run_tgt_gridsearch(
         row = {**params}
         try:
             with torch.inference_mode():
-                Z, years, w = compute_tgt_embeddings(
+                Z, years, w, _ = compute_tgt_embeddings(
                     prep,
                     target_year=target_year,
                     device=device,

@@ -280,7 +280,7 @@ def run_gtmae_gridsearch(
     for i, hp in enumerate(combos, 1):
         desc = f"{i}/{len(combos)}"
         try:
-            model, Z = train_edge_node_multitask(
+            model, Z, _ = train_edge_node_multitask(
                 data=data,
                 target_cols=target_cols,
                 node_feat_names=node_feat_names,

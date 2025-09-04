@@ -252,7 +252,7 @@ def run_gtmvae_gridsearch(
         desc = f"{i}/{len(combos)}"
         print(f"[{desc}] {hp}")
         try:
-            model, Z = train_edge_node_multitask_v(
+            model, Z, _ = train_edge_node_multitask_v(
                 data=data,
                 target_cols=target_cols,
                 node_feat_names=node_feat_names,

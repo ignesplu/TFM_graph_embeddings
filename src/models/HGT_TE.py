@@ -668,6 +668,7 @@ def train_hgtte(
     temporal_layers: int = 2,
     temporal_heads: int = 4,
     temporal_ff: int = 512,
+    temporal_pe_dim: Optional[int] = None,
     target_year: int = 2022,
     lambda_focus: float = 0.25,
 ):
@@ -734,6 +735,7 @@ def train_hgtte(
         temporal_heads=temporal_heads,
         temporal_ff=temporal_ff,
         target_year=target_year,
+        temporal_pe_dim=temporal_pe_dim,
         years_sorted=ginputs.years_sorted,
         metadata=meta,
         lambda_focus=lambda_focus,
@@ -743,4 +745,18 @@ def train_hgtte(
     with torch.no_grad():
         Z = model(ginputs.data_per_year)  # [N, D]
 
-    return Z
+    # Embedding DataFrame
+    Z_cpu = Z.detach().cpu()
+    N, D = Z_cpu.shape
+    inv = [""] * N
+
+    index_map = p._build_index_from_tabu(tabu if "cc" in tabu.columns else tabu.reset_index().rename(columns={tabu.index.name:"cc"}))
+    for cc, idx in index_map.items():
+        if 0 <= idx < N:
+            inv[idx] = str(cc)
+
+    col_names = [f"emb_{j}" for j in range(D)]
+    df_emb = pd.DataFrame(Z_cpu.numpy(), columns=col_names)
+    df_emb.insert(0, "cc", inv)
+
+    return Z, df_emb
