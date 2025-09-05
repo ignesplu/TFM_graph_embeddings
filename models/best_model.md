@@ -20,7 +20,7 @@
 | `add_idea_emb`   | False        |
 | `n_loops`        | 5            |
 | `datat_agg_type` | LINE-MMS-Sum |
-| `emb_dim`        | 128          |
+| `emb_dim`        | 256          |
 | `batch_size`     | 10000        |
 | `neg`            | 5            |
 | `lr`             | 0.005        |
@@ -35,7 +35,7 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | True                |
 | `hid`              | 128                 |
-| `out`              | 128                 |
+| `out`              | 256                 |
 | `heads`            | 2                   |
 | `dropout`          | 0.2                 |
 | `lr`               | 0.001               |
@@ -65,7 +65,7 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | True                |
 | `hid`              | 128                 |
-| `out`              | 128                 |
+| `out`              | 256                 |
 | `heads`            | 2                   |
 | `dropout`          | 0.2                 |
 | `lr`               | 0.001               |
@@ -99,7 +99,7 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | True                |
 | `hid`              | 128                 |
-| `out`              | 128                 |
+| `out`              | 256                 |
 | `heads`            | 2                   |
 | `dropout`          | 0.2                 |
 | `lr`               | 0.001               |
@@ -131,7 +131,7 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | True                |
 | `hid`              | 128                 |
-| `out`              | 128                 |
+| `out`              | 256                 |
 | `heads`            | 2                   |
 | `dropout`          | 0.2                 |
 | `lr`               | 0.001               |
@@ -232,7 +232,7 @@
 | Parámetro          | Valor  |
 | ------------------ | ------ |
 | `add_idea_emb`     | False  |
-| `hidden`           | 64     |
+| `hidden`           | 256    |
 | `heads`            | 2      |
 | `tf_layers`        | 1      |
 | `tf_ff`            | 256    |
@@ -246,7 +246,7 @@
 | Parámetro          | Valor  |
 | ------------------ | ------ |
 | `add_idea_emb`     | False  |
-| `hidden`           | 64     |
+| `hidden`           | 256    |
 | `heads`            | 4      |
 | `tf_layers`        | 2      |
 | `tf_ff`            | 256    |
@@ -264,12 +264,12 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | False               |
 | `spatial_hidden`   | 128                 |
-| `spatial_out`      | 128                 |
+| `spatial_out`      | 256                 |
 | `heads`            | 4                   |
 | `dropout`          | 0.3                 |
 | `temporal_layers`  | 1                   |
 | `temporal_heads`   | 4                   |
-| `temporal_ff`      | 128                 |
+| `temporal_ff`      | 256                 |
 | `temporal_pe_dim`  | None                |
 | `lambda_focus`     | 0.25                |
 
@@ -279,12 +279,12 @@
 | ------------------ | ------------------- |
 | `add_idea_emb`     | False               |
 | `spatial_hidden`   | 128                 |
-| `spatial_out`      | 128                 |
+| `spatial_out`      | 256                 |
 | `heads`            | 2                   |
 | `dropout`          | 0.3                 |
 | `temporal_layers`  | 1                   |
 | `temporal_heads`   | 4                   |
-| `temporal_ff`      | 128                 |
+| `temporal_ff`      | 256                 |
 | `temporal_pe_dim`  | None                |
 | `lambda_focus`     | 0.1                 |
 
