@@ -14,7 +14,7 @@ El código implementa un pipeline completo que incluye:
 
 * **Extracción, depuración y transformación de datos** a partir de fuentes oficiales (INE, IECM, CNIG, CRTM e Idealista).
 * **Construcción de grafos urbanos** con atributos nodales e internodales, estáticos y dinámicos.
-* **Generación de embeddings** mediante distintas arquitecturas: métodos clásicos (LINE) y modelos basados en *Graph Neural Networks* y *Transformers* (GTMAE, GTMVAE, E2A-SAGE, TGT y HGT-TE).
+* **Generación de embeddings** mediante distintas arquitecturas: métodos clásicos (LINE) y modelos basados en *Graph Neural Networks* y *Transformers* (GTMAE, GTMVAE, E2A-SAGE-MAE, TGT y HGT-TE).
 * **Validación de embeddings** mediante tareas de predicción supervisada (regresión y clasificación) con regresores lineales y no lineales, utilizando métricas como RMSE, MAE, ROC-AUC y F1-score.
 
 El repositorio posee un apartado de *notebooks* organizados para facilitar la **reproducibilidad** del TFM, incluyendo los *steps* de preprocesado, EDA, entrenamiento y validación de resultados. Su estructura permite escalar la metodología a otras unidades territoriales, desde barrios hasta países, con aplicaciones en **planificación urbana, segmentación de mercados y detección de desigualdades territoriales**.
