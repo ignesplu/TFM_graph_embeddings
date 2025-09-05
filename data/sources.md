@@ -71,8 +71,6 @@
 
 | Nombre                          |   Fuente  |        Unidad        | Intervalo de datos | Descripción |
 |---------------------------------|:---------:|:--------------------:|:------------------:| --------------------------- |
-| `p_votos_PP_2023` | ALMUDENA | % personas | 2023 | Porcentaje de votos al PP en las elecciones al Congreso de los Diputados del año 2023 |
-| `p_votos_PSOE_2023` | ALMUDENA | % personas | 2023 | Porcentaje de votos al PSOE en las elecciones al Congreso de los Diputados del año 2023 |
 | `n_doc_cred_pre_hip` | ALMUDENA | Nº Documentos | 2022 | Número de documentos notariales de créditos, préstamos y garantías hipotecarias |
 | `n_ongs` | ALMUDENA | Nº ONGs | 2022 | Número de documentos notariales de créditos, préstamos y garantías hipotecarias |
 | `n_lin_tel_ATF` | ALMUDENA | Nº Líneas | 2022 | número de líneas telefónicas ATF |
