@@ -36,8 +36,9 @@ El repositorio posee un apartado de *notebooks* organizados para facilitar la **
 ├── src
 │   ├── prepro                    # Preprocessing main functions
 │   │   └── main_functions.py
-│   ├── eda                       # EDA main functions
-│   │   └── main_functions.py
+│   ├── eda                  
+│   │   ├── main_functions.py     # EDA pre-train main functions
+│   │   └── post_validation.py    # EDA post-validation functions
 │   ├── models                    # Models train pipelines
 │   │   ├── utils.py
 │   │   ├── LINE.py
