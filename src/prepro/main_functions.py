@@ -1,8 +1,9 @@
-'''
+"""
 Dentro del presente fichero se comparten únicamente las funcionalidades consideradas como relevantes
 utilizadas en el prepocesado de datos usados en el trabajo (data/sources). Código menos relevante como
 depuración de datos base (tipados, duplicados, cruces, etc.) no se muestran en el repositorio.
-'''
+"""
+
 import geopandas as gpd
 import pandas as pd
 import numpy as np
@@ -53,10 +54,14 @@ def prepro_shp_file(file_path: str):
         adjacent = int(geom_a.touches(geom_b))  # 1 if adjacent, 0 if not
         results.append((mun_a, mun_b, adjacent))
 
-    adjacency_df = pd.DataFrame(results, columns=["Municipio_A", "Municipio_B", "Colindantes"])
+    adjacency_df = pd.DataFrame(
+        results, columns=["Municipio_A", "Municipio_B", "Colindantes"]
+    )
 
     # Filter municipalities from other autonomous communities
-    other_communities_gdf = gdf[~gdf["NATCODE"].astype(str).str.startswith("341328")].copy()
+    other_communities_gdf = gdf[
+        ~gdf["NATCODE"].astype(str).str.startswith("341328")
+    ].copy()
     other_communities_gdf = other_communities_gdf.to_crs(epsg=25830)
 
     # Create DataFrame of Madrid municipalities bordering other autonomous communities
@@ -129,7 +134,9 @@ def impute_knn(df: pd.DataFrame, ind_dict, neig_grid=[3, 5, 7, 9]) -> pd.DataFra
             try:
                 knn = KNNImputer(n_neighbors=k)
                 imputado = knn.fit_transform(subdata_masked)
-                imputado_df = pd.DataFrame(imputado, columns=missing_cols, index=subdata.index)
+                imputado_df = pd.DataFrame(
+                    imputado, columns=missing_cols, index=subdata.index
+                )
                 error = mean_squared_error(original_values, imputado_df[mask_for_cv])
                 scores[k] = error
             except Exception:
@@ -217,27 +224,26 @@ def impute_rf(df: pd.DataFrame) -> pd.DataFrame:
     X_test = X_test.reindex(columns=X_train.columns, fill_value=0)
 
     # Imputar valores faltantes
-    df.loc[df[var2input].isna(), var2input] = np.round(best_model.predict(X_test)).astype(int)
+    df.loc[df[var2input].isna(), var2input] = np.round(
+        best_model.predict(X_test)
+    ).astype(int)
 
     return df
 
 
-def fill_and_cut_time_series(
-        data: pd.DataFrame,
-        ceil_year: int = 2022
-) -> pd.DataFrame:
+def fill_and_cut_time_series(data: pd.DataFrame, ceil_year: int = 2022) -> pd.DataFrame:
     """
     Fill missing years in time series columns and trim future years.
-    
+
     Identifies time series columns with pattern 'prefix_YYYY' and:
     1. Removes columns for years beyond the specified ceiling year
     2. Imputes missing intermediate years using linear regression per row
     3. Maintains complete time series from minimum available year to ceiling year
-    
+
     Args:
         data: Input DataFrame with time series columns
         ceil_year: Maximum year to include (columns beyond this year + 1 are dropped)
-        
+
     Returns:
         DataFrame with processed time series columns
     """
@@ -305,29 +311,31 @@ def fill_and_cut_time_series(
 def add_idea_text_emb(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add text embeddings for idea titles and descriptions using E5-base-v2 model.
-    
+
     Generates text embeddings for the 'title_description' column using the
     intfloat/e5-base-v2 sentence transformer model. This model achieves
     83.5% top-5 retrieval accuracy according to MTEB benchmarks.
-    
+
     Based on:
     - Muennighoff, N. et al. (2025). Best Open-Source Embedding Models Benchmarked and Ranked
     - https://huggingface.co/intfloat/e5-base-v2
     - https://arxiv.org/pdf/2212.03533
-    
+
     Args:
         df: Input DataFrame containing a 'title_description' column
-        
+
     Returns:
         DataFrame with added 'title_desc_emb' column containing text embeddings
     """
     if "title_description" not in df.columns:
         raise ValueError("La columna 'title_description' no está en el DataFrame")
 
-    model = SentenceTransformer('intfloat/e5-base-v2', device='cuda')
+    model = SentenceTransformer("intfloat/e5-base-v2", device="cuda")
 
     texts = df["title_description"].fillna("").astype(str).tolist()
-    embeddings = model.encode(texts, batch_size=32, show_progress_bar=True, device='cuda')
+    embeddings = model.encode(
+        texts, batch_size=32, show_progress_bar=True, device="cuda"
+    )
     df["title_desc_emb"] = embeddings.tolist()
 
     return df
