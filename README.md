@@ -1,12 +1,10 @@
-<div style="text-align:center">
-  <div style="font-size:28px; font-weight:700; margin:0 0 4px;">
-    Representaciones inmobiliarias basadas en graph-embeddings para el análisis de similitud entre municipios
-  </div>
-  <div style="font-size:16px; font-style:italic; margin:0 0 12px;">
-    Ignacio Esplugues Conca
-  </div>
+
+</div>
   <img src="./img/Logo_VIU.png" alt="Logo VIU" style="max-width:100%; height:auto;">
 </div>
+
+# Representaciones inmobiliarias basadas en _graph-embeddings_ para el análisis de similitud entre municipios
+#### _Ignacio Esplugues Conca_
 
 ## Descripción
 
