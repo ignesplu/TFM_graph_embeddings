@@ -750,7 +750,9 @@ def train_hgtte(
     N, D = Z_cpu.shape
     inv = [""] * N
 
-    index_map = p._build_index_from_tabu(tabu if "cc" in tabu.columns else tabu.reset_index().rename(columns={tabu.index.name:"cc"}))
+    index_map = p._build_index_from_tabu(
+        tabu if "cc" in tabu.columns else tabu.reset_index().rename(columns={tabu.index.name: "cc"})
+    )
     for cc, idx in index_map.items():
         if 0 <= idx < N:
             inv[idx] = str(cc)

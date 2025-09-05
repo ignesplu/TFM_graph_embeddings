@@ -49,9 +49,7 @@ def plot_map(
         n_rows = math.ceil(n / n_cols)
 
         # Subplots
-        fig, axes = plt.subplots(
-            n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows), sharey=False
-        )
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows), sharey=False)
         axes = axes.flatten()
 
         for i, col in enumerate(columnas):
@@ -173,9 +171,7 @@ def _get_series_by_prefix(df: pd.DataFrame, prefix: str, col_id="cc"):
     for cc in df[col_id].unique():
         df_cc = df[df[col_id] == cc]
         year_cols = [
-            (int(match.group(1)), col)
-            for col in df_cc.columns
-            if (match := pattern.match(col))
+            (int(match.group(1)), col) for col in df_cc.columns if (match := pattern.match(col))
         ]
         if len(year_cols) < 2:
             continue

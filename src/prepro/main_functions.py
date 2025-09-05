@@ -54,14 +54,10 @@ def prepro_shp_file(file_path: str):
         adjacent = int(geom_a.touches(geom_b))  # 1 if adjacent, 0 if not
         results.append((mun_a, mun_b, adjacent))
 
-    adjacency_df = pd.DataFrame(
-        results, columns=["Municipio_A", "Municipio_B", "Colindantes"]
-    )
+    adjacency_df = pd.DataFrame(results, columns=["Municipio_A", "Municipio_B", "Colindantes"])
 
     # Filter municipalities from other autonomous communities
-    other_communities_gdf = gdf[
-        ~gdf["NATCODE"].astype(str).str.startswith("341328")
-    ].copy()
+    other_communities_gdf = gdf[~gdf["NATCODE"].astype(str).str.startswith("341328")].copy()
     other_communities_gdf = other_communities_gdf.to_crs(epsg=25830)
 
     # Create DataFrame of Madrid municipalities bordering other autonomous communities
@@ -134,9 +130,7 @@ def impute_knn(df: pd.DataFrame, ind_dict, neig_grid=[3, 5, 7, 9]) -> pd.DataFra
             try:
                 knn = KNNImputer(n_neighbors=k)
                 imputado = knn.fit_transform(subdata_masked)
-                imputado_df = pd.DataFrame(
-                    imputado, columns=missing_cols, index=subdata.index
-                )
+                imputado_df = pd.DataFrame(imputado, columns=missing_cols, index=subdata.index)
                 error = mean_squared_error(original_values, imputado_df[mask_for_cv])
                 scores[k] = error
             except Exception:
@@ -224,9 +218,7 @@ def impute_rf(df: pd.DataFrame) -> pd.DataFrame:
     X_test = X_test.reindex(columns=X_train.columns, fill_value=0)
 
     # Imputar valores faltantes
-    df.loc[df[var2input].isna(), var2input] = np.round(
-        best_model.predict(X_test)
-    ).astype(int)
+    df.loc[df[var2input].isna(), var2input] = np.round(best_model.predict(X_test)).astype(int)
 
     return df
 
@@ -333,9 +325,7 @@ def add_idea_text_emb(df: pd.DataFrame) -> pd.DataFrame:
     model = SentenceTransformer("intfloat/e5-base-v2", device="cuda")
 
     texts = df["title_description"].fillna("").astype(str).tolist()
-    embeddings = model.encode(
-        texts, batch_size=32, show_progress_bar=True, device="cuda"
-    )
+    embeddings = model.encode(texts, batch_size=32, show_progress_bar=True, device="cuda")
     df["title_desc_emb"] = embeddings.tolist()
 
     return df

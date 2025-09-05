@@ -664,21 +664,27 @@ class TemporalGraphTransformer(nn.Module):
 
         H = torch.empty((T, N, self.cfg.hidden), device=device, dtype=X_static.dtype)
         for t in range(T):
-            xt = torch.cat([X_static, X_temp[t], M_temp[t]], dim=-1)   # [N, D_s + 2*D_temp]
+            xt = torch.cat([X_static, X_temp[t], M_temp[t]], dim=-1)  # [N, D_s + 2*D_temp]
             xt = self.input_proj(xt)  # [N, hidden]
-            ht = self.spatial(xt, edge_index_dir, edge_attr_dir, edge_index_und, edge_attr_und)  # [N, hidden]
+            ht = self.spatial(
+                xt, edge_index_dir, edge_attr_dir, edge_index_und, edge_attr_und
+            )  # [N, hidden]
             H[t] = ht  # in-place
 
         # Temporal encoding
-        pe = sinusoidal_time_encoding(years, ref_year=target_year, d_model=self.cfg.time_enc_dim
-                                      ).to(device=device, dtype=H.dtype)  # [T, d_t]
+        pe = sinusoidal_time_encoding(
+            years, ref_year=target_year, d_model=self.cfg.time_enc_dim
+        ).to(
+            device=device, dtype=H.dtype
+        )  # [T, d_t]
         pe_h = self.time_proj(pe).unsqueeze(1)  # [T, 1, hidden]
         H = H + pe_h  # broadcast -> [T, N, hidden]
 
         # Reordenar a [N, T, hidden]
-        H_bt = H.permute(1, 0, 2).contiguous()          # [N, T, hidden]
-        w = exponential_weights(years, target_year=target_year, decay=decay
-                                ).to(device=device, dtype=H_bt.dtype)  # [T]
+        H_bt = H.permute(1, 0, 2).contiguous()  # [N, T, hidden]
+        w = exponential_weights(years, target_year=target_year, decay=decay).to(
+            device=device, dtype=H_bt.dtype
+        )  # [T]
 
         bs = 1024  # adjust over RAM (p.ej., 256/512/1024)
         z = torch.empty((N, self.cfg.hidden), device=device, dtype=H_bt.dtype)
@@ -727,21 +733,49 @@ def compute_tgt_embeddings(
     Xt = prep.X_temp.to(device, non_blocking=True)
     Mt = prep.M_temp.to(device, non_blocking=True) if prep.M_temp is not None else None
     eidir = prep.edge_index_dir.to(device, non_blocking=True)
-    eeadir = prep.edge_attr_dir.to(device, non_blocking=True) if prep.edge_attr_dir is not None else None
+    eeadir = (
+        prep.edge_attr_dir.to(device, non_blocking=True) if prep.edge_attr_dir is not None else None
+    )
     eiund = prep.edge_index_und.to(device, non_blocking=True)
-    eeaund = prep.edge_attr_und.to(device, non_blocking=True) if prep.edge_attr_und is not None else None
+    eeaund = (
+        prep.edge_attr_und.to(device, non_blocking=True) if prep.edge_attr_und is not None else None
+    )
 
-    use_cuda = (device.type == "cuda")
-    amp_ctx = (torch.cuda.amp.autocast(dtype=torch.bfloat16) if use_cuda else torch.autocast("cpu", dtype=torch.bfloat16))
+    use_cuda = device.type == "cuda"
+    amp_ctx = (
+        torch.cuda.amp.autocast(dtype=torch.bfloat16)
+        if use_cuda
+        else torch.autocast("cpu", dtype=torch.bfloat16)
+    )
 
     with torch.inference_mode():
         if use_cuda:
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                Z, w = model(Xs, Xt, Mt, prep.years, eidir, eeadir, eiund, eeaund,
-                             target_year=target_year, decay=decay)
+                Z, w = model(
+                    Xs,
+                    Xt,
+                    Mt,
+                    prep.years,
+                    eidir,
+                    eeadir,
+                    eiund,
+                    eeaund,
+                    target_year=target_year,
+                    decay=decay,
+                )
         else:
-            Z, w = model(Xs, Xt, Mt, prep.years, eidir, eeadir, eiund, eeaund,
-                         target_year=target_year, decay=decay)
+            Z, w = model(
+                Xs,
+                Xt,
+                Mt,
+                prep.years,
+                eidir,
+                eeadir,
+                eiund,
+                eeaund,
+                target_year=target_year,
+                decay=decay,
+            )
 
     Z_cpu = Z.detach().cpu()
     w_cpu = w.detach().cpu()

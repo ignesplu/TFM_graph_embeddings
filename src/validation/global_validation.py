@@ -10,10 +10,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import (
-    mean_squared_error, r2_score,
-    accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, balanced_accuracy_score, matthews_corrcoef,
-    average_precision_score
+    mean_squared_error,
+    r2_score,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    balanced_accuracy_score,
+    matthews_corrcoef,
+    average_precision_score,
 )
 
 from xgboost import XGBRegressor, XGBClassifier
@@ -24,10 +30,10 @@ from ..models.utils import global_prepro
 def _is_binary(y: np.ndarray) -> bool:
     """
     Check if target array represents binary classification.
-    
+
     Args:
         y: Target array
-        
+
     Returns:
         Boolean indicating if target has exactly two classes
     """
@@ -38,10 +44,10 @@ def _is_binary(y: np.ndarray) -> bool:
 def _get_emb_cols(df: pd.DataFrame) -> List[str]:
     """
     Extract embedding column names from DataFrame.
-    
+
     Args:
         df: Input DataFrame
-        
+
     Returns:
         List of column names starting with 'emb_'
     """
@@ -51,13 +57,13 @@ def _get_emb_cols(df: pd.DataFrame) -> List[str]:
 def _cv_iterator(task: str, y: np.ndarray, n_splits: int, random_state: int):
     """
     Get appropriate cross-validator based on task type.
-    
+
     Args:
         task: Type of task ('classification' or 'regression')
         y: Target array
         n_splits: Number of folds
         random_state: Random seed
-        
+
     Returns:
         Cross-validator object
     """
@@ -68,17 +74,16 @@ def _cv_iterator(task: str, y: np.ndarray, n_splits: int, random_state: int):
 
 def _regression_models(random_state: int):
     """Create regression model instances with standardized configurations.
-    
+
     Args:
         random_state: Random seed
-        
+
     Returns:
         Dictionary of regression models (Linear Regression and XGBoost)
     """
-    lin = Pipeline([
-        ("scaler", StandardScaler(with_mean=True, with_std=True)),
-        ("lr", LinearRegression())
-    ])
+    lin = Pipeline(
+        [("scaler", StandardScaler(with_mean=True, with_std=True)), ("lr", LinearRegression())]
+    )
     xgb = XGBRegressor(
         n_estimators=500,
         max_depth=6,
@@ -89,7 +94,7 @@ def _regression_models(random_state: int):
         reg_lambda=1.0,
         random_state=random_state,
         n_jobs=-1,
-        tree_method="hist"
+        tree_method="hist",
     )
     return {"LR": lin, "XGB": xgb}
 
@@ -97,23 +102,25 @@ def _regression_models(random_state: int):
 def _classification_models(random_state: int, binary: bool):
     """
     Create classification model instances with standardized configurations.
-    
+
     Args:
         random_state: Random seed
         binary: Whether the task is binary classification
-        
+
     Returns:
         Dictionary of classification models (Logistic Regression and XGBoost)
     """
-    logreg = Pipeline([
-        ("scaler", StandardScaler(with_mean=True, with_std=True)),
-        ("logit", LogisticRegression(
-            max_iter=1000,
-            class_weight="balanced",
-            solver="lbfgs",
-            n_jobs=-1
-        ))
-    ])
+    logreg = Pipeline(
+        [
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            (
+                "logit",
+                LogisticRegression(
+                    max_iter=1000, class_weight="balanced", solver="lbfgs", n_jobs=-1
+                ),
+            ),
+        ]
+    )
     xgb_params = dict(
         n_estimators=500,
         max_depth=6,
@@ -136,11 +143,11 @@ def _classification_models(random_state: int, binary: bool):
 def _regression_metrics(y_true, y_pred):
     """
     Calculate regression evaluation metrics.
-    
+
     Args:
         y_true: True values
         y_pred: Predicted values
-        
+
     Returns:
         Dictionary of regression metrics (RMSE and R²)
     """
@@ -152,16 +159,16 @@ def _regression_metrics(y_true, y_pred):
 def _classification_metrics(y_true, y_pred, y_proba, binary: bool):
     """
     Calculate comprehensive classification evaluation metrics.
-    
+
     Robust metrics handling class imbalance including balanced accuracy,
     MCC, and probability-based metrics when available.
-    
+
     Args:
         y_true: True labels
         y_pred: Predicted labels
         y_proba: Predicted probabilities
         binary: Whether the task is binary classification
-        
+
     Returns:
         Dictionary of classification metrics
     """
@@ -194,21 +201,21 @@ def _classification_metrics(y_true, y_pred, y_proba, binary: bool):
         "Recall_macro": rec,
         "F1_macro": f1,
         "ROC_AUC": roc,
-        "AP": ap
+        "AP": ap,
     }
 
 
 def _probas_from_model(model, X):
     """
     Extract probabilities from model using available methods.
-    
+
     Attempts to get probabilities through predict_proba, falls back to
     decision_function with appropriate scaling for binary and multi-class cases.
-    
+
     Args:
         model: Trained model
         X: Input features
-        
+
     Returns:
         Probability estimates or None if unavailable
     """
@@ -235,12 +242,12 @@ def _probas_from_model(model, X):
 def _best_threshold(y_true, pos_scores, grid=None):
     """
     Find optimal threshold that maximizes macro F1 score.
-    
+
     Args:
         y_true: True labels
         pos_scores: Positive class scores/probabilities
         grid: Threshold grid to search
-        
+
     Returns:
         Optimal threshold value
     """
@@ -261,15 +268,15 @@ def evaluate_embeddings(
     targets_dict: Dict[str, str],
     id_col: str = "cc",
     n_splits: int = 5,
-    random_state: int = 42
+    random_state: int = 42,
 ) -> pd.DataFrame:
     """
     Evaluate embedding quality using cross-validation with multiple models and metrics.
-    
+
     Comprehensive evaluation framework that tests embeddings on various regression
     and classification tasks using both linear models and XGBoost with proper
     handling of class imbalance and cross-validation.
-    
+
     Args:
         embeddings: List of (embedding_name, embedding_dataframe) tuples
         validacion_df: DataFrame with target variables for evaluation
@@ -277,7 +284,7 @@ def evaluate_embeddings(
         id_col: Node identifier column name
         n_splits: Number of cross-validation folds
         random_state: Random seed for reproducibility
-        
+
     Returns:
         DataFrame with evaluation results across all embeddings and targets
     """
@@ -289,7 +296,7 @@ def evaluate_embeddings(
     results = {}
 
     for emb_name, emb_df in embeddings:
-        print(f'Evaluating {emb_name}...')
+        print(f"Evaluating {emb_name}...")
         emb_cols = _get_emb_cols(emb_df)
         if not emb_cols:
             raise ValueError(f"No se encontraron columnas 'emb_' en el embedding {emb_name}")
@@ -298,7 +305,7 @@ def evaluate_embeddings(
         merged = emb_df[[id_col] + emb_cols].merge(validacion_df, on=id_col, how="inner")
 
         for target_col, task in targets_dict.items():
-            print(f'  · Target {target_col} ({task})')
+            print(f"  · Target {target_col} ({task})")
             if target_col not in merged.columns:
                 # Si la columna no está, saltamos
                 continue
@@ -323,12 +330,16 @@ def evaluate_embeddings(
                 # 1) contador por etiqueta original
                 label_counts = pd.Series(y_unique).map(lambda lbl: np.sum(y == lbl)).values
                 # 2) ordenar labels por frecuencia ascendente -> minoritaria primero
-                sorted_labels = [lbl for _, lbl in sorted(zip(label_counts, y_unique), key=lambda t: t[0])]
+                sorted_labels = [
+                    lbl for _, lbl in sorted(zip(label_counts, y_unique), key=lambda t: t[0])
+                ]
                 if len(sorted_labels) == 2:
                     mapping = {sorted_labels[1]: 0, sorted_labels[0]: 1}  # minoritaria -> 1
                 else:
                     # multiclase: mapeo ordenado estable
-                    mapping = {lbl: i for i, lbl in enumerate(sorted(sorted_labels, key=lambda z: str(z)))}
+                    mapping = {
+                        lbl: i for i, lbl in enumerate(sorted(sorted_labels, key=lambda z: str(z)))
+                    }
                 y = np.vectorize(mapping.get)(y)
 
                 binary = _is_binary(y)
@@ -341,7 +352,9 @@ def evaluate_embeddings(
                         counts = np.pad(counts, (0, 2 - counts.size), constant_values=0)
                     min_class = counts[counts > 0].min() if counts.sum() > 0 else 0
                     eff_splits = min(n_splits, max(2, int(min_class)))  # al menos 2
-                    cv = StratifiedKFold(n_splits=eff_splits, shuffle=True, random_state=random_state)
+                    cv = StratifiedKFold(
+                        n_splits=eff_splits, shuffle=True, random_state=random_state
+                    )
                 else:
                     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
@@ -356,7 +369,7 @@ def evaluate_embeddings(
 
             # Evaluación CV
             for pred_name, base_model in models.items():
-                print(f'    · Model {pred_name}')
+                print(f"    · Model {pred_name}")
                 fold_metrics = []
 
                 for train_idx, test_idx in cv.split(X, y):
@@ -390,10 +403,16 @@ def evaluate_embeddings(
                             # buscar umbral óptimo en el train del fold
                             y_proba_train = _probas_from_model(model, X_train)
                             if y_proba_train is not None:
-                                pos_scores_train = y_proba_train if y_proba_train.ndim == 1 else y_proba_train[:, 1]
+                                pos_scores_train = (
+                                    y_proba_train
+                                    if y_proba_train.ndim == 1
+                                    else y_proba_train[:, 1]
+                                )
                                 thr = _best_threshold(y_train, pos_scores_train)
-                                pos_scores_test = y_proba_test if (y_proba_test is not None and y_proba_test.ndim == 1) else (
-                                    None if y_proba_test is None else y_proba_test[:, 1]
+                                pos_scores_test = (
+                                    y_proba_test
+                                    if (y_proba_test is not None and y_proba_test.ndim == 1)
+                                    else (None if y_proba_test is None else y_proba_test[:, 1])
                                 )
                                 if pos_scores_test is not None:
                                     y_pred = (pos_scores_test >= thr).astype(int)
@@ -406,16 +425,15 @@ def evaluate_embeddings(
                             y_pred = model.predict(X_test)
 
                         m = _classification_metrics(
-                            y_test,
-                            y_pred,
-                            y_proba_test,
-                            binary=_is_binary(y)
+                            y_test, y_pred, y_proba_test, binary=_is_binary(y)
                         )
 
                     fold_metrics.append(m)
 
                 # Promedio de métricas sobre folds
-                avg_metrics = {k: np.nanmean([fm[k] for fm in fold_metrics]) for k in fold_metrics[0].keys()}
+                avg_metrics = {
+                    k: np.nanmean([fm[k] for fm in fold_metrics]) for k in fold_metrics[0].keys()
+                }
                 # std_metrics disponible si lo quieres: std_metrics = {k: np.nanstd([fm[k] for fm in fold_metrics]) for k in fold_metrics[0].keys()}
 
                 # Guardamos media por métrica
@@ -454,28 +472,28 @@ def evaluate_embeddings(
 
 
 def global_validation(
-        *,
-        tabu: pd.DataFrame,
-        temp: pd.DataFrame,
-        mdir: pd.DataFrame,
-        mndi: pd.DataFrame,
-        no_mad: bool = False,
-        add_idea_emb: bool = True,
-        val_df: pd.DataFrame,
-        val_n_splits: int = 3,
-        node_id_col: str = 'cc',
-        year_col: str = 'year',
-        emb_year: int = 2022,
-        embeddings: list,
-        seed: int = 33
+    *,
+    tabu: pd.DataFrame,
+    temp: pd.DataFrame,
+    mdir: pd.DataFrame,
+    mndi: pd.DataFrame,
+    no_mad: bool = False,
+    add_idea_emb: bool = True,
+    val_df: pd.DataFrame,
+    val_n_splits: int = 3,
+    node_id_col: str = "cc",
+    year_col: str = "year",
+    emb_year: int = 2022,
+    embeddings: list,
+    seed: int = 33,
 ) -> pd.DataFrame:
     """
     Perform comprehensive global validation of embeddings across multiple data sources.
-    
+
     End-to-end validation pipeline that integrates tabular, temporal, and edge data,
     prepares validation targets, and evaluates embedding performance on both
     known and unknown variables using cross-validation.
-    
+
     Args:
         tabu: Tabular data DataFrame
         temp: Temporal data DataFrame
@@ -490,17 +508,19 @@ def global_validation(
         emb_year: Embedding target year
         embeddings: List of embeddings to evaluate
         seed: Random seed for reproducibility
-        
+
     Returns:
         DataFrame with comprehensive validation results
     """
     # Prepro
-    tabu, temp, mdir, mndi = global_prepro(tabu, temp, mdir, mndi, no_mad=no_mad, add_idea_emb=add_idea_emb)
+    tabu, temp, mdir, mndi = global_prepro(
+        tabu, temp, mdir, mndi, no_mad=no_mad, add_idea_emb=add_idea_emb
+    )
 
     # Variables de validación (conocidas del año emb_year)
-    val_temp_col = ['eur_renta_b_xhab', 'n_ss_general_por_hab', 'poblacion']
+    val_temp_col = ["eur_renta_b_xhab", "n_ss_general_por_hab", "poblacion"]
     temp_val = temp[temp[year_col] == emb_year][[node_id_col] + val_temp_col].set_index(node_id_col)
-    val_tabu_col = ['idea_price_mean', 'idea_size_mean', 'colinda_con_19']
+    val_tabu_col = ["idea_price_mean", "idea_size_mean", "colinda_con_19"]
     tabu_val = tabu[[node_id_col] + val_tabu_col].set_index(node_id_col)
 
     # DataFrame para validar
@@ -508,18 +528,18 @@ def global_validation(
 
     targets = {
         # Known vars
-        "eur_renta_b_xhab":     "regression",
+        "eur_renta_b_xhab": "regression",
         "n_ss_general_por_hab": "regression",
-        "idea_price_mean":      "regression",
-        "idea_size_mean":       "regression",
-        "poblacion":            "regression",
+        "idea_price_mean": "regression",
+        "idea_size_mean": "regression",
+        "poblacion": "regression",
         "n_migr_inter_por_hab": "regression",
-        "n_bibliotecas":        "regression",
-        "colinda_con_19":       "classification",
+        "n_bibliotecas": "regression",
+        "colinda_con_19": "classification",
         # Unknown vars
-        "n_doc_cred_pre_hip":   "regression",
-        "n_ongs":               "regression",
-        "n_lin_tel_ATF":        "regression",
+        "n_doc_cred_pre_hip": "regression",
+        "n_ongs": "regression",
+        "n_lin_tel_ATF": "regression",
     }
 
     val_results = evaluate_embeddings(
@@ -528,7 +548,7 @@ def global_validation(
         targets_dict=targets,
         id_col=node_id_col,
         n_splits=val_n_splits,
-        random_state=seed
+        random_state=seed,
     )
 
     return val_results
