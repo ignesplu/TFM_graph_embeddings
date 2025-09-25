@@ -27,6 +27,50 @@ from xgboost import XGBRegressor, XGBClassifier
 from ..models.utils import global_prepro
 
 
+def _t_critical_95(df: int) -> float:
+    """
+    Valor crítico t para 95% (bilateral) según df pequeños.
+    Para df >= 60 usamos z ≈ 1.96.
+    """
+    # Tabla clásica (dos colas, 0.975)
+    table = {
+        1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+        8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145,
+        15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+        21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056,
+        27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042
+    }
+    if df <= 0:
+        return float("nan")
+    if df <= 30:
+        return table[df]
+    if df < 60:
+        # pequeña aproximación lineal hacia 1.96
+        return 2.042 - (df - 30) * (2.042 - 1.96) / (60 - 30)
+    return 1.96  # z para df grandes
+
+
+def _mean_ci_from_folds(values: List[float]) -> Tuple[float, float, float, int]:
+    """
+    Devuelve (mean, ci_low, ci_high, n) con CI95% a partir de valores por fold.
+    Ignora NaNs.
+    """
+    arr = np.array(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    n = int(arr.size)
+    if n == 0:
+        return np.nan, np.nan, np.nan, 0
+    mean = float(np.mean(arr))
+    if n == 1:
+        return mean, np.nan, np.nan, 1
+    # t-interval
+    s = float(np.std(arr, ddof=1))
+    se = s / np.sqrt(n)
+    crit = _t_critical_95(n - 1)
+    half = crit * se
+    return mean, mean - half, mean + half, n
+
+
 def _is_binary(y: np.ndarray) -> bool:
     """
     Check if target array represents binary classification.
@@ -268,7 +312,7 @@ def evaluate_embeddings(
     targets_dict: Dict[str, str],
     id_col: str = "cc",
     n_splits: int = 5,
-    random_state: int = 42,
+    random_state: int = 42
 ) -> pd.DataFrame:
     """
     Evaluate embedding quality using cross-validation with multiple models and metrics.
@@ -286,9 +330,8 @@ def evaluate_embeddings(
         random_state: Random seed for reproducibility
 
     Returns:
-        DataFrame with evaluation results across all embeddings and targets
+        DataFrame with evaluation results (mean, ci_low, ci_high) across all embeddings and targets
     """
-    # Validaciones mínimas
     assert id_col in validacion_df.columns, f"{id_col} no está en validacion_df"
     for name, df in embeddings:
         assert id_col in df.columns, f"{id_col} no está en {name}"
@@ -296,65 +339,46 @@ def evaluate_embeddings(
     results = {}
 
     for emb_name, emb_df in embeddings:
-        print(f"Evaluating {emb_name}...")
+        print(f'Evaluating {emb_name}...')
         emb_cols = _get_emb_cols(emb_df)
         if not emb_cols:
             raise ValueError(f"No se encontraron columnas 'emb_' en el embedding {emb_name}")
 
-        # Merge con validación
         merged = emb_df[[id_col] + emb_cols].merge(validacion_df, on=id_col, how="inner")
 
         for target_col, task in targets_dict.items():
-            print(f"  · Target {target_col} ({task})")
+            print(f'  · Target {target_col} ({task})')
             if target_col not in merged.columns:
-                # Si la columna no está, saltamos
                 continue
 
-            # Preparar X, y
             X = merged[emb_cols].values
             y = merged[target_col].values
 
-            # Drop NaNs en y y X correspondientes
+            # Drop NaNs
             mask = ~pd.isna(y)
-            X = X[mask]
-            y = y[mask]
-
+            X, y = X[mask], y[mask]
             if X.shape[0] == 0:
                 continue
 
             if task == "classification":
                 # asegurar codificación numérica de clases
                 y_unique = pd.unique(y)
-
-                # Mapear a ints garantizando que la clase minoritaria sea 1 (positiva)
-                # 1) contador por etiqueta original
                 label_counts = pd.Series(y_unique).map(lambda lbl: np.sum(y == lbl)).values
-                # 2) ordenar labels por frecuencia ascendente -> minoritaria primero
-                sorted_labels = [
-                    lbl for _, lbl in sorted(zip(label_counts, y_unique), key=lambda t: t[0])
-                ]
+                sorted_labels = [lbl for _, lbl in sorted(zip(label_counts, y_unique), key=lambda t: t[0])]
                 if len(sorted_labels) == 2:
                     mapping = {sorted_labels[1]: 0, sorted_labels[0]: 1}  # minoritaria -> 1
                 else:
-                    # multiclase: mapeo ordenado estable
-                    mapping = {
-                        lbl: i for i, lbl in enumerate(sorted(sorted_labels, key=lambda z: str(z)))
-                    }
+                    mapping = {lbl: i for i, lbl in enumerate(sorted(sorted_labels, key=lambda z: str(z)))}
                 y = np.vectorize(mapping.get)(y)
 
                 binary = _is_binary(y)
-
-                # Reducción dinámica de n_splits si la minoritaria es pequeña (solo binario)
                 if binary:
                     counts = np.bincount(y.astype(int))
-                    # evitar zeros en bincount si faltan etiquetas
                     if counts.size < 2:
                         counts = np.pad(counts, (0, 2 - counts.size), constant_values=0)
                     min_class = counts[counts > 0].min() if counts.sum() > 0 else 0
-                    eff_splits = min(n_splits, max(2, int(min_class)))  # al menos 2
-                    cv = StratifiedKFold(
-                        n_splits=eff_splits, shuffle=True, random_state=random_state
-                    )
+                    eff_splits = min(n_splits, max(2, int(min_class)))
+                    cv = StratifiedKFold(n_splits=eff_splits, shuffle=True, random_state=random_state)
                 else:
                     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
@@ -369,8 +393,9 @@ def evaluate_embeddings(
 
             # Evaluación CV
             for pred_name, base_model in models.items():
-                print(f"    · Model {pred_name}")
-                fold_metrics = []
+                print(f'    · Model {pred_name}')
+                # fold_metrics: lista de dicts, uno por fold
+                fold_metrics: List[Dict[str, float]] = []
 
                 for train_idx, test_idx in cv.split(X, y):
                     X_train, X_test = X[train_idx], X[test_idx]
@@ -395,23 +420,17 @@ def evaluate_embeddings(
                         y_pred = model.predict(X_test)
                         m = _regression_metrics(y_test, y_pred)
 
-                    else:
-                        # Clasificación
+                    else:  # Clasificación
                         y_proba_test = _probas_from_model(model, X_test)
 
                         if _is_binary(y):
                             # buscar umbral óptimo en el train del fold
                             y_proba_train = _probas_from_model(model, X_train)
                             if y_proba_train is not None:
-                                pos_scores_train = (
-                                    y_proba_train
-                                    if y_proba_train.ndim == 1
-                                    else y_proba_train[:, 1]
-                                )
+                                pos_scores_train = y_proba_train if y_proba_train.ndim == 1 else y_proba_train[:, 1]
                                 thr = _best_threshold(y_train, pos_scores_train)
                                 pos_scores_test = (
-                                    y_proba_test
-                                    if (y_proba_test is not None and y_proba_test.ndim == 1)
+                                    y_proba_test if (y_proba_test is not None and y_proba_test.ndim == 1)
                                     else (None if y_proba_test is None else y_proba_test[:, 1])
                                 )
                                 if pos_scores_test is not None:
@@ -421,52 +440,51 @@ def evaluate_embeddings(
                             else:
                                 y_pred = model.predict(X_test)
                         else:
-                            # multiclase: predicción directa
                             y_pred = model.predict(X_test)
 
                         m = _classification_metrics(
-                            y_test, y_pred, y_proba_test, binary=_is_binary(y)
+                            y_test,
+                            y_pred,
+                            y_proba_test,
+                            binary=_is_binary(y)
                         )
 
                     fold_metrics.append(m)
 
-                # Promedio de métricas sobre folds
-                avg_metrics = {
-                    k: np.nanmean([fm[k] for fm in fold_metrics]) for k in fold_metrics[0].keys()
-                }
-                # std_metrics disponible si lo quieres: std_metrics = {k: np.nanstd([fm[k] for fm in fold_metrics]) for k in fold_metrics[0].keys()}
+                # IC95%
+                metric_names = list(fold_metrics[0].keys())
+                for metric_name in metric_names:
+                    vals = [fm[metric_name] for fm in fold_metrics]
+                    mean, lo, hi, n = _mean_ci_from_folds(vals)
 
-                # Guardamos media por métrica
-                for metric_name in avg_metrics.keys():
                     row_key = (target_col, metric_name)
-                    col_key = (emb_name, pred_name)
-                    results.setdefault(row_key, {})[col_key] = avg_metrics[metric_name]
+                    for stat, val in (("mean", mean), ("ci_low", lo), ("ci_high", hi), ("n", n)):
+                        col_key = (emb_name, pred_name, stat)
+                        results.setdefault(row_key, {})[col_key] = val
 
-    # Construcción del DataFrame final
     if not results:
         return pd.DataFrame()
 
-    # reunir todas las columnas vistas
     all_cols = set()
     for _, cols in results.items():
         all_cols.update(cols.keys())
 
     def _col_sort_key(col):
-        emb, pred = col
+        emb, pred, stat = col
         pred_order = {"LR": 0, "XGB": 1}
-        return (emb, pred_order.get(pred, 99), pred)
+        stat_order = {"mean": 0, "ci_low": 1, "ci_high": 2, "n": 3}
+        return (emb, pred_order.get(pred, 99), pred, stat_order.get(stat, 99))
 
     sorted_cols = sorted(all_cols, key=_col_sort_key)
 
     index = pd.MultiIndex.from_tuples(results.keys(), names=["target", "metric"])
-    columns = pd.MultiIndex.from_tuples(sorted_cols, names=["embedding", "predictor"])
+    columns = pd.MultiIndex.from_tuples(sorted_cols, names=["embedding", "predictor", "stat"])
 
     out = pd.DataFrame(index=index, columns=columns, dtype=float)
     for row_key, cols in results.items():
         for col_key, val in cols.items():
             out.loc[row_key, col_key] = val
 
-    # ordenar índice alfabéticamente por target y métrica
     out = out.sort_index(axis=0)
     return out
 
