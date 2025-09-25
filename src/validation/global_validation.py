@@ -518,7 +518,7 @@ def global_validation(
     )
 
     # Variables de validación (conocidas del año emb_year)
-    val_temp_col = ["eur_renta_b_xhab", "n_ss_general_por_hab", "poblacion"]
+    val_temp_col = ["eur_renta_b_xhab", "n_ss_general_por_hab", "poblacion", "n_migr_inter_por_hab", "n_bibliotecas"]
     temp_val = temp[temp[year_col] == emb_year][[node_id_col] + val_temp_col].set_index(node_id_col)
     val_tabu_col = ["idea_price_mean", "idea_size_mean", "colinda_con_19"]
     tabu_val = tabu[[node_id_col] + val_tabu_col].set_index(node_id_col)
