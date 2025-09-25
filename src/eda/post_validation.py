@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple, Dict, Any
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -198,3 +198,155 @@ def umap_2d_plot(
 
     fig.tight_layout()
     return df_2d, fig, ax
+
+
+def cook_distance_latent(
+    df_full: pd.DataFrame,
+    df_drop: pd.DataFrame,
+    removed_cc: int,
+    emb_prefix: str = "emb_",
+    align: bool = True,
+    metric_cosine_matrix: bool = True,
+) -> Dict[str, Any]:
+    """Calculate Cook's distance in latent space to measure node removal impact.
+    
+    Quantifies how much the embeddings of remaining nodes change when a specific
+    municipality is removed from the training data. Provides both vector displacement
+    and cosine similarity changes with optional Procrustes alignment.
+    
+    Args:
+        df_full: DataFrame with embeddings trained on ALL municipalities
+        df_drop: DataFrame with embeddings trained WITHOUT the removed municipality
+        removed_cc: Identifier of the municipality removed in df_drop
+        emb_prefix: Prefix for embedding columns (default: 'emb_')
+        align: Whether to apply orthogonal alignment (Procrustes) to account for rotation differences
+        metric_cosine_matrix: Whether to compute changes in cosine similarity matrix
+        
+    Returns:
+        Dictionary containing:
+            - meta: Process information (common nodes, dimensions, alignment details)
+            - global: Global metrics (mean vector displacement, cosine changes)
+            - per_node: DataFrame with deltas per node (L2 shifts, cosine changes)
+            - top_affected: Top nodes most affected by removal
+            - interpretation: Brief textual interpretation of impact magnitude
+    """
+    emb_cols = [c for c in df_full.columns if c.startswith(emb_prefix)]
+    if not emb_cols:
+        raise ValueError(f"No se encontraron columnas de embedding con prefijo '{emb_prefix}'.")
+
+    if removed_cc in set(df_drop["cc"]):
+        raise ValueError(f"'{removed_cc}' aparece en df_drop; debería estar eliminado en ese DataFrame.")
+
+    df_full_cmp = df_full[df_full["cc"] != removed_cc].copy()
+
+    common = sorted(set(df_full_cmp["cc"]).intersection(set(df_drop["cc"])))
+    if len(common) < 3:
+        raise ValueError("Muy pocos cc comunes para comparar (se requieren >= 3).")
+
+    F = df_full_cmp.set_index("cc").loc[common, emb_cols].to_numpy()
+    D = df_drop.set_index("cc").loc[common, emb_cols].to_numpy()
+    n, d = F.shape
+
+    R = None
+    aligned = False
+    cond_number = None
+    if align:
+        Fc = F - F.mean(axis=0, keepdims=True)
+        Dc = D - D.mean(axis=0, keepdims=True)
+
+        M = Dc.T @ Fc
+        U, S, Vt = np.linalg.svd(M, full_matrices=False)
+        R = U @ Vt
+        F_aligned = (F - F.mean(axis=0, keepdims=True)) @ R + D.mean(axis=0, keepdims=True)
+
+        cond_number = (S.max() / S.min()) if S.min() > 0 else np.inf
+        F = F_aligned
+        aligned = True
+
+    vec_delta = F - D
+    l2_shift = np.linalg.norm(vec_delta, axis=1)
+    mean_l2 = float(l2_shift.mean())
+    median_l2 = float(np.median(l2_shift))
+
+    center = D.mean(axis=0, keepdims=True)
+    typical_scale = float(np.mean(np.linalg.norm(D - center, axis=1))) + 1e-12
+    rel_mean_l2 = float(mean_l2 / typical_scale)
+
+    def _cosine_matrix(X):
+        Xn = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-12)
+        return Xn @ Xn.T
+
+    mean_abs_delta_cos = np.nan
+    median_abs_delta_cos = np.nan
+    mean_abs_delta_cos_per_node = np.full(n, np.nan)
+
+    if metric_cosine_matrix:
+        S_full = _cosine_matrix(F)
+        S_drop = _cosine_matrix(D)
+        triu_idx = np.triu_indices(n, k=1)
+        abs_diff = np.abs(S_full[triu_idx] - S_drop[triu_idx])
+        mean_abs_delta_cos = float(abs_diff.mean())
+        median_abs_delta_cos = float(np.median(abs_diff))
+        mean_abs_delta_cos_per_node = np.mean(np.abs(S_full - S_drop), axis=1)
+
+    per_node = pd.DataFrame({
+        "cc": common,
+        "l2_shift": l2_shift,
+        "mean_abs_delta_cosine": mean_abs_delta_cos_per_node,
+    }).sort_values("l2_shift", ascending=False).reset_index(drop=True)
+
+    top_by_l2 = per_node.nlargest(10, "l2_shift")[["cc", "l2_shift"]].values.tolist()
+    if metric_cosine_matrix:
+        top_by_cos = per_node.nlargest(10, "mean_abs_delta_cosine")[["cc", "mean_abs_delta_cosine"]].values.tolist()
+    else:
+        top_by_cos = []
+
+    if rel_mean_l2 < 0.05:
+        lvl_vec = "muy bajo"
+    elif rel_mean_l2 < 0.15:
+        lvl_vec = "bajo-moderado"
+    elif rel_mean_l2 < 0.30:
+        lvl_vec = "moderado"
+    else:
+        lvl_vec = "alto"
+
+    if metric_cosine_matrix and not np.isnan(mean_abs_delta_cos):
+        if mean_abs_delta_cos < 0.02:
+            lvl_cos = "bajo"
+        elif mean_abs_delta_cos < 0.05:
+            lvl_cos = "moderado"
+        else:
+            lvl_cos = "alto"
+        cos_text = f"Cambio medio de similitud coseno {mean_abs_delta_cos:.3f} ({lvl_cos}). "
+    else:
+        cos_text = ""
+
+    interp = (
+        f"Impacto global del eliminado {removed_cc}: desplazamiento medio relativo {rel_mean_l2:.3f} ({lvl_vec}). "
+        + cos_text
+        + "Nodos en 'top_affected' indican dónde se concentra el efecto."
+    )
+
+    return {
+        "meta": {
+            "removed_cc": removed_cc,
+            "n_common": n,
+            "dim": d,
+            "aligned": aligned,
+            "alignment_cond_number": cond_number,
+            "emb_cols": emb_cols[:5] + (["..."] if len(emb_cols) > 5 else []),
+        },
+        "global": {
+            "mean_l2_shift": mean_l2,
+            "median_l2_shift": median_l2,
+            "rel_mean_l2_shift": rel_mean_l2,
+            "mean_abs_delta_cosine": mean_abs_delta_cos,
+            "median_abs_delta_cosine": median_abs_delta_cos,
+        },
+        "per_node": per_node,
+        "top_affected": {
+            "by_l2_shift": top_by_l2,
+            "by_cosine_change": top_by_cos
+        },
+        "interpretation": interp,
+    }
