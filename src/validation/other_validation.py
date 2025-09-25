@@ -1,6 +1,8 @@
 import re
 import numpy as np
 import pandas as pd
+from typing import List, Union, Optional, Dict, Any
+from sklearn.neighbors import NearestNeighbors
 from scipy.stats import friedmanchisquare, rankdata, wilcoxon
 import scikit_posthocs as sp
 
@@ -322,4 +324,181 @@ def statistical_analysis(df, usar_wilcoxon=True, hacer_bootstrap=False, B=2000, 
         "nemenyi_pvals": nemenyi,
         "CD": CD,
         "wilcoxon_holm": wilcoxon_holm if usar_wilcoxon else None,
+    }
+
+
+def knn_category_agreement(
+    df: pd.DataFrame,
+    label_cols: List[str],
+    *,
+    id_col: str = "cc",
+    emb_prefix: str = "emb_",
+    k: int = 10,
+    metric: str = "cosine",
+    quantiles: Optional[Union[int, Dict[str, int]]] = None,
+) -> Dict[str, Any]:
+    """
+    Calculate K-nearest neighbors category agreement for embedding validation.
+
+    For each node and each target variable, finds K nearest neighbors by embedding
+    similarity and measures how many neighbors share the same category/quantile.
+    Useful for validating that similar embeddings correspond to similar attributes.
+
+    Args:
+        df: DataFrame containing embeddings and target variables
+        label_cols: List of target variable names to evaluate
+        id_col: Node identifier column name
+        emb_prefix: Prefix for embedding columns
+        k: Number of nearest neighbors to consider
+        metric: Distance metric for neighbor search
+        quantiles: Number of quantiles for discretizing numeric variables.
+                  Can be integer (for all variables) or dict (per-variable)
+
+    Returns:
+        Dictionary containing:
+            - per_cc_col: Detailed results per node and variable
+            - by_column: Summary statistics per variable
+            - by_node: Summary statistics per node
+            - details: Metadata about the analysis configuration
+    """
+    # 1) Embeddings y validaciones
+    emb_cols = [c for c in df.columns if c.startswith(emb_prefix)]
+    if not emb_cols:
+        raise ValueError(f"No se encontraron columnas que empiecen por '{emb_prefix}'.")
+    if id_col not in df.columns:
+        raise ValueError(f"No se encuentra id_col='{id_col}' en df.")
+    for col in label_cols:
+        if col not in df.columns:
+            raise ValueError(f"La columna objetivo '{col}' no existe en df.")
+
+    df = df.copy()
+    X = df[emb_cols].to_numpy()
+    ids = df[id_col].to_numpy()
+    n_samples = len(df)
+    n_neighbors = min(k + 1, n_samples)
+
+    # 2) KNN
+    nn = NearestNeighbors(n_neighbors=n_neighbors, metric=metric)
+    nn.fit(X)
+    knn_idx = nn.kneighbors(return_distance=False)
+
+    # 3) Preparar variables categorizadas
+    def _q_for(col: str) -> Optional[int]:
+        if quantiles is None:
+            return None
+        if isinstance(quantiles, int):
+            return quantiles
+        if isinstance(quantiles, dict):
+            return quantiles.get(col, None)
+        return None
+
+    cat_data: Dict[str, pd.Series] = {}
+    bin_info: Dict[str, Any] = {}
+
+    for col in label_cols:
+        s = df[col]
+        q = _q_for(col)
+        if q is not None and q >= 2 and pd.api.types.is_numeric_dtype(s):
+            labels = [f"Q{i+1}" for i in range(q)]
+            s_cat = pd.qcut(s, q=q, labels=labels, duplicates="drop")
+
+            try:
+                _, edges = pd.qcut(s, q=q, retbins=True, duplicates="drop")
+                edges = list(map(float, edges))
+            except Exception:
+                edges = None
+            cat_data[col] = s_cat.astype("object")
+            bin_info[col] = {
+                "type": "quantile",
+                "requested_q": q,
+                "effective_labels": list(s_cat.cat.categories) if hasattr(s_cat, "cat") else None,
+                "edges": edges,
+            }
+        else:
+            cat_data[col] = s.astype("object")
+            bin_info[col] = {
+                "type": "as_is",
+                "requested_q": None,
+                "effective_labels": None,
+                "edges": None,
+            }
+
+    # 4) Scoring por cc y columna
+    rows = []
+    for i in range(n_samples):
+        neigh = [j for j in knn_idx[i] if j != i][:k]
+
+        for col in label_cols:
+            target = cat_data[col].iloc[i]
+            if pd.isna(target):
+                rows.append(
+                    {
+                        id_col: ids[i],
+                        "column": col,
+                        "category": np.nan,
+                        "matches": np.nan,
+                        "neighbors_used": 0,
+                        "proportion": np.nan,
+                    }
+                )
+                continue
+
+            neigh_labels = cat_data[col].iloc[neigh]
+            valid_mask = ~neigh_labels.isna()
+            valid_labels = neigh_labels[valid_mask]
+
+            matches = int((valid_labels == target).sum())
+            neighbors_used = int(valid_mask.sum())
+            proportion = (matches / neighbors_used) if neighbors_used > 0 else np.nan
+
+            rows.append(
+                {
+                    id_col: ids[i],
+                    "column": col,
+                    "category": target,
+                    "matches": matches,
+                    "neighbors_used": neighbors_used,
+                    "proportion": proportion,
+                }
+            )
+
+    per_cc_col = pd.DataFrame(rows)
+    per_cc_col_valid = per_cc_col.dropna(subset=["proportion"]).copy()
+    if per_cc_col_valid.empty:
+        raise ValueError("No hay proporciones válidas (todas las etiquetas objetivo son NaN).")
+
+    # 5) Resúmenes
+    by_column = (
+        per_cc_col_valid.groupby("column")
+        .agg(
+            mean_proportion=("proportion", "mean"),
+            mean_matches=("matches", "mean"),
+            n=("proportion", "size"),
+        )
+        .reset_index()
+        .sort_values("mean_proportion", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    by_node = (
+        per_cc_col_valid.groupby(id_col)["proportion"]
+        .mean()
+        .rename("mean_proportion_across_columns")
+        .reset_index()
+        .sort_values("mean_proportion_across_columns", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    return {
+        "per_cc_col": per_cc_col_valid.sort_values(["column", id_col]).reset_index(drop=True),
+        "by_column": by_column,
+        "by_node": by_node,
+        "details": {
+            "k": k,
+            "metric": metric,
+            "emb_cols": emb_cols[:5] + (["..."] if len(emb_cols) > 5 else []),
+            "quantiles": quantiles,
+            "binning_info": bin_info,
+            "note": "La proporción es #coincidencias / #vecinos con etiqueta válida para esa columna.",
+        },
     }

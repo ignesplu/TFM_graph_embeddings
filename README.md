@@ -55,7 +55,8 @@ El repositorio posee un apartado de *notebooks* organizados para facilitar la **
 │       │   ├── E2A_SAGE_MAE.py
 │       │   ├── TGT.py
 │       │   └── HGT_TE.py
-│       └── global_validation.py  # Models global validation pipeline
+│       ├── global_validation.py  # Models global validation pipeline
+│       └── other_validation.py   # Other models global validations (stat tests, knn)
 ├── README.md                     # Description and structure of the repository
 └── requirements.txt              # Libreries and versions used in the project
 ```
